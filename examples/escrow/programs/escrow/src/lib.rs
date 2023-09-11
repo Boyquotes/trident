@@ -68,6 +68,13 @@ pub mod escrow {
             Some(ctx.accounts.escrow_account.initializer_key),
         )?;
 
+        let mut dummy = 1;
+        dummy += 1;
+        dummy = dummy + 1;
+
+        let mut dummy_checked: i32 = 1;
+        dummy_checked = dummy_checked.checked_add(1).unwrap();
+
         Ok(())
     }
 

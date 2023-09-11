@@ -61,11 +61,14 @@ pub use temp_clone::TempClone;
 mod keys;
 pub use keys::*;
 
-pub mod idl;
-pub mod program_client_generator;
-
-pub mod test_generator;
-pub use test_generator::TestGenerator;
-
+pub mod detect_in_idl;
+pub mod detector;
 pub mod error_reporter;
+pub mod idl;
+pub mod idl_detect;
+pub mod program_client_generator;
+pub mod test_generator;
+
+pub use detector::Detector;
 pub use error_reporter::*;
+pub use test_generator::TestGenerator;

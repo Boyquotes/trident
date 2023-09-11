@@ -1,6 +1,7 @@
 use crate::{
+    detect_in_idl,
     idl::{self, Idl},
-    program_client_generator,
+    idl_detect, program_client_generator,
     test_generator::TESTS_WORKSPACE,
     Client,
 };
@@ -40,6 +41,8 @@ pub enum Error {
     ReadProgramCodeFailed(String),
     #[error("{0:?}")]
     Idl(#[from] idl::Error),
+    #[error("{0:?}")]
+    IdlDetect(#[from] idl_detect::Error),
     #[error("{0:?}")]
     TomlDeserialize(#[from] toml::de::Error),
     #[error("parsing Cargo.toml dependencies failed")]
@@ -338,6 +341,35 @@ impl Commander {
             .join(PROGRAM_CLIENT_DIRECTORY)
             .join("src/lib.rs");
         fs::write(rust_file_path, &program_client).await?;
+    }
+    /// Updates the `program_client` `lib.rs`.
+    ///
+    /// It's used internally by the [`#[trdelnik_test]`](trdelnik_test::trdelnik_test) macro.
+    #[throws]
+    pub async fn detect_program_client_lib_rs(&self, module_name: &String) {
+        let idl_programs = self.program_packages().map(|package| async move {
+            let name = package.name;
+            let output = Command::new("cargo")
+                .arg("+nightly")
+                .arg("rustc")
+                .args(["--package", &name])
+                .arg("--profile=check")
+                .arg("--")
+                .arg("-Zunpretty=expanded")
+                .output()
+                .await?;
+            if output.status.success() {
+                let code = String::from_utf8(output.stdout)?;
+                Ok(idl_detect::parse_to_idl_program_for_detect(&code, module_name).await?)
+            } else {
+                let error_text = String::from_utf8(output.stderr)?;
+                Err(Error::ReadProgramCodeFailed(error_text))
+            }
+        });
+        let idl = idl_detect::Idl {
+            programs: try_join_all(idl_programs).await?,
+        };
+        detect_in_idl::detect_in_idl(idl);
     }
 
     /// Formats program code.

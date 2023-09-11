@@ -18,3 +18,7 @@ pub use explorer::{explorer, ExplorerCommand};
 
 mod init;
 pub use init::init;
+
+
+mod detect;
+pub use detect::detect;

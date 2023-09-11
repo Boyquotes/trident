@@ -56,6 +56,11 @@ enum Command {
         #[arg(short, long)]
         skip_fuzzer: bool,
     },
+    Detect {
+        /// Module containing source codes
+        #[clap(short, long)]
+        module_name: String,
+    },
 }
 
 #[throws]
@@ -70,5 +75,6 @@ pub async fn start() {
         Command::Localnet => command::localnet().await?,
         Command::Explorer { subcmd } => command::explorer(subcmd).await?,
         Command::Init { skip_fuzzer } => command::init(skip_fuzzer).await?,
+        Command::Detect { module_name } => command::detect(module_name).await?,
     }
 }
