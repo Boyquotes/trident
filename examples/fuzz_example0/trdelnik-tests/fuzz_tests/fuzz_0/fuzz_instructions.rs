@@ -70,6 +70,26 @@ pub mod fuzz_example0_fuzz_instructions {
             .to_account_metas(None);
             Ok((vec![user, counter], acc_meta))
         }
+
+        fn check(
+            &self,
+            pre_ix: Self::IxSnapshot,
+            post_ix: Self::IxSnapshot,
+            ix_data: Self::IxData,
+        ) -> Result<(), &'static str> {
+            match pre_ix.counter {
+                FuzzAccOption::None => todo!(),
+                FuzzAccOption::Typed(acc) => todo!(),
+                FuzzAccOption::Raw(_) => todo!(),
+            }
+            if let FuzzAccOption::Typed(acc) = pre_ix.counter {
+
+            }
+            if pre_ix.user.is_some_and(|user| user.is_signer) {};
+
+            Ok(())
+        }
+
     }
     impl<'info> IxOps<'info> for Update {
         type IxData = fuzz_example0::instruction::Update;
