@@ -471,7 +471,12 @@ impl TestGenerator {
 
         let fuzz_test_path = new_fuzz_test_dir.join(FUZZ_TEST);
 
-        let fuzz_test_content = load_template!("/src/templates/trident-tests/test_fuzz.rs");
+        // let fuzz_test_content = load_template!("/src/templates/trident-tests/test_fuzz.rs");
+        let fuzz_test_content = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/templates/trident-tests/ligh_client_test_fuzz.rs"
+        ))
+        .to_string();
 
         let use_entry = format!("use {}::entry;\n", program_name);
         let use_instructions = format!("use {}::ID as PROGRAM_ID;\n", program_name);

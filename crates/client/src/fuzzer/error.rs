@@ -12,6 +12,10 @@ pub enum FuzzClientError {
     // Box for Error variant too Long warnings
     #[error("Banks Client Error: {0}")]
     BanksError(Box<BanksClientError>),
+    #[error("Cannot Get Account")]
+    CannotGetAccounts,
+    #[error("This method is not implemented for this type of the Client")]
+    NotImplemnted,
 }
 
 #[derive(Debug, Error)]

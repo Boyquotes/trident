@@ -1,3 +1,4 @@
+use crate::accounts_storage::PdaStore;
 use crate::fuzzing::ProgramTest;
 use crate::fuzzing::{ProgramTestContext, SYSTEM_PROGRAM_ID};
 use crate::solana_sdk::account::Account;
@@ -170,5 +171,21 @@ impl FuzzClient for ProgramTestClientBlocking {
 
     fn get_rent(&mut self) -> Result<Rent, FuzzClientError> {
         Ok(self.rt.block_on(self.ctx.banks_client.get_rent())?)
+    }
+
+    fn set_data_account(&mut self, _lamports: u64, _space: usize) -> Keypair {
+        todo!("Only implemented for LightClient")
+    }
+
+    fn set_pda_data_account(
+        &mut self,
+        _seeds: &[&[u8]],
+        _program_id: &Pubkey,
+        _space: usize,
+    ) -> Option<PdaStore> {
+        todo!("Only implemented for LightClient")
+    }
+    fn set_pda_account(&mut self, _seeds: &[&[u8]], _program_id: &Pubkey) -> Option<PdaStore> {
+        todo!("Only implemented for LightClient")
     }
 }
