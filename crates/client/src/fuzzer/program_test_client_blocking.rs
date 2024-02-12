@@ -1,3 +1,4 @@
+use crate::accounts_storage::PdaStore;
 use crate::fuzzing::ProgramTest;
 use crate::fuzzing::{ProgramTestContext, SYSTEM_PROGRAM_ID};
 use crate::solana_sdk::account::Account;
@@ -38,6 +39,32 @@ impl FuzzClient for ProgramTestClientBlocking {
         let account = AccountSharedData::new(lamports, 0, &SYSTEM_PROGRAM_ID);
         self.ctx.set_account(&owner.pubkey(), &account);
         owner
+    }
+    fn set_data_account(&mut self, _lamports: u64, _space: usize) -> Keypair {
+        todo!()
+    }
+    fn set_pda_account(
+        &mut self,
+        seeds: &[&[u8]],
+        program_id: &Pubkey,
+    ) -> std::option::Option<PdaStore> {
+        if let Some((key, _)) = Pubkey::try_find_program_address(seeds, program_id) {
+            let seeds_vec: Vec<_> = seeds.iter().map(|&s| s.to_vec()).collect();
+            Some(PdaStore {
+                pubkey: key,
+                seeds: seeds_vec,
+            })
+        } else {
+            None
+        }
+    }
+    fn set_pda_data_account(
+        &mut self,
+        _seeds: &[&[u8]],
+        _program_id: &Pubkey,
+        _space: usize,
+    ) -> Option<PdaStore> {
+        todo!()
     }
 
     fn set_token_account(

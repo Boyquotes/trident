@@ -3,7 +3,7 @@ use anchor_client::anchor_lang::solana_program::hash::Hash;
 use arbitrary::Arbitrary;
 use arbitrary::Unstructured;
 use solana_sdk::account::Account;
-use solana_sdk::instruction::AccountMeta;
+use solana_sdk::instruction::{AccountMeta, Instruction};
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Keypair;
 use solana_sdk::transaction::VersionedTransaction;
@@ -11,6 +11,7 @@ use std::cell::RefCell;
 use std::error::Error;
 use std::fmt::Display;
 
+use crate::accounts_storage::PdaStore;
 use crate::error::*;
 
 pub struct FuzzData<T, U> {
@@ -161,6 +162,15 @@ pub trait FuzzClient {
     // TODO add methods to modify current accounts
     // TODO check if self must be mutable
     fn set_account(&mut self, lamports: u64) -> Keypair;
+    fn set_data_account(&mut self, lamports: u64, space: usize) -> Keypair;
+    fn set_pda_account(&mut self, seeds: &[&[u8]], program_id: &Pubkey) -> Option<PdaStore>;
+    fn set_pda_data_account(
+        &mut self,
+        seeds: &[&[u8]],
+        program_id: &Pubkey,
+        space: usize,
+    ) -> Option<PdaStore>;
+
     #[allow(clippy::too_many_arguments)]
     fn set_token_account(
         &mut self,
@@ -191,8 +201,13 @@ pub trait FuzzClient {
 
     fn process_transaction(
         &mut self,
-        transaction: impl Into<VersionedTransaction>,
-    ) -> Result<(), FuzzClientError>;
+        _transaction: impl Into<VersionedTransaction>,
+    ) -> Result<(), FuzzClientError> {
+        Err(FuzzClientError::NotImplemnted)
+    }
+    fn process_instruction(&mut self, _instruction: Instruction) -> Result<(), FuzzClientError> {
+        Err(FuzzClientError::NotImplemnted)
+    }
 }
 
 #[macro_export]

@@ -42,13 +42,16 @@ pub mod fuzzing {
     pub use super::fuzzer::data_builder::build_ix_fuzz_data;
     pub use super::fuzzer::data_builder::*;
 
+    pub use super::fuzzer::light_client::LighClient;
     pub use super::fuzzer::program_test_client_blocking::ProgramTestClientBlocking;
+
     pub use super::fuzzer::snapshot::Snapshot;
     pub use super::fuzzer::*;
     pub use std::cell::RefCell;
     pub use trdelnik_derive_displayix::DisplayIx;
     pub use trdelnik_derive_fuzz_deserialize::FuzzDeserialize;
     pub use trdelnik_derive_fuzz_test_executor::FuzzTestExecutor;
+    pub use trdelnik_derive_fuzz_test_executor::FuzzTestExecutorLight;
 }
 
 pub use futures::{self, FutureExt};
