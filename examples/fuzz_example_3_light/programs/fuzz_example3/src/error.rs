@@ -7,4 +7,5 @@ pub enum VestingError {
     InvalidInterval,
     Overflow,
     Underflow,
+    InvalidRealloc
 }

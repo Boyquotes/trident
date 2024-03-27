@@ -17,7 +17,7 @@ struct TestSyscallStubs {
 
 impl program_stubs::SyscallStubs for TestSyscallStubs {
     fn sol_log(&self, message: &str) {
-        println!("{message}");
+        println!("{message}"); // FIXME maybe eprintln?
     }
     fn sol_get_rent_sysvar(&self, _var_addr: *mut u8) -> u64 {
         0
@@ -32,6 +32,8 @@ impl program_stubs::SyscallStubs for TestSyscallStubs {
         signers_seeds: &[&[&[u8]]],
     ) -> ProgramResult {
         if instruction.program_id == solana_program::system_program::ID {
+            // let entry = solana_system_program::system_processor::Entrypoint::rust();
+            // let ctx = InvokeContext{};
             let instruction =
                 solana_sdk::program_utils::limited_deserialize(&instruction.data).unwrap();
             // TODO It may be correct to implement this as
@@ -164,6 +166,10 @@ impl program_stubs::SyscallStubs for TestSyscallStubs {
             0
         }
     }
+
+    // fn sol_get_stack_height(&self) -> u64 {
+    //     1
+    // }
 }
 
 pub fn subtract_lamports(from: &AccountInfo, lamports: u64) {
