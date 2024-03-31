@@ -1,23 +1,17 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::mem::{self, size_of};
+use std::mem::size_of;
 
-use solana_bpf_loader_program::serialization::serialize_parameters;
 use solana_program::entrypoint::{
     deserialize, BPF_ALIGN_OF_U128, MAX_PERMITTED_DATA_INCREASE, NON_DUP_MARKER,
 };
 use solana_program::instruction::InstructionError;
-use solana_program::stable_layout::stable_instruction::StableInstruction;
-use solana_program::{bpf_loader, bpf_loader_deprecated};
 use solana_program::{instruction::AccountMeta, program_pack::Pack, rent::Rent};
-use solana_program_runtime::invoke_context::SerializedAccountMetadata;
 use solana_program_runtime::solana_rbpf::aligned_memory::{AlignedMemory, Pod};
-use solana_program_runtime::solana_rbpf::ebpf::{HOST_ALIGN, MM_INPUT_START};
-use solana_program_runtime::solana_rbpf::memory_region::{MemoryRegion, MemoryState};
+use solana_program_runtime::solana_rbpf::ebpf::HOST_ALIGN;
 use solana_program_test_anchor_fix::IndexOfAccount;
 use solana_sdk::account::AccountSharedData;
 use solana_sdk::clock::Epoch;
-use solana_sdk::transaction_context::{BorrowedAccount, InstructionContext, TransactionContext};
 use solana_sdk::{
     account::Account, account_info::AccountInfo, instruction::Instruction, program_option::COption,
     pubkey::Pubkey, signature::Keypair, signer::Signer,
@@ -78,19 +72,6 @@ impl From<AccountSharedData> for TridentAccount {
     }
 }
 
-impl From<TridentAccount> for AccountSharedData {
-    fn from(tacc: TridentAccount) -> Self {
-        Account {
-            lamports: tacc.lamports,
-            data: tacc.data,
-            owner: tacc.owner,
-            executable: tacc.executable,
-            rent_epoch: tacc.rent_epoch,
-        }
-        .into()
-    }
-}
-
 impl std::default::Default for TridentAccount {
     fn default() -> Self {
         TridentAccount::new(0, 0, &solana_sdk::system_program::ID)
@@ -142,42 +123,6 @@ impl LighClient {
             .collect();
         result
     }
-
-    pub fn get_ix_accounts(&self, metas: &[AccountMeta]) -> Vec<(Pubkey, AccountSharedData)> {
-        let result: Vec<_> = metas
-            .iter()
-            .map(|m| {
-                let acc = self
-                    .account_storage
-                    .borrow()
-                    .get(&m.pubkey)
-                    .unwrap()
-                    .clone();
-                // TODO optimize this, because here we create Account from TridentAccount and than AccountShareData from Account
-                let acc = AccountSharedData::from(acc);
-                (m.pubkey, acc)
-            })
-            .collect();
-        result
-    }
-
-    // pub fn get_ix_accounts_ser(&self, metas: &[AccountMeta]) -> Vec<SerializeAccountCustom> {
-    //     let result: Vec<_> = metas
-    //         .iter()
-    //         .map(|m| {
-    //             let acc = self
-    //                 .account_storage
-    //                 .borrow()
-    //                 .get(&m.pubkey)
-    //                 .unwrap()
-    //                 .clone();
-    //             // TODO optimize this, because here we create Account from TridentAccount and than AccountShareData from Account
-    //             let acc = AccountSharedData::from(acc);
-    //             (m.pubkey, acc)
-    //         })
-    //         .collect();
-    //     result
-    // }
 
     pub fn add_program(&mut self, program_id: Pubkey) {
         let program = TridentAccount {
@@ -395,19 +340,26 @@ impl FuzzClient for LighClient {
 
         let mut temporary_account_storage = self.get_temporary_accounts(&instruction.accounts);
 
+        let mut dedup_ixs: HashMap<Pubkey, u16> = HashMap::new();
         for (i, (account_meta, account_data)) in temporary_account_storage.iter_mut().enumerate() {
-            let account_info = AccountInfo::new(
-                &account_meta.pubkey,
-                account_meta.is_signer,
-                account_meta.is_writable,
-                &mut account_data.lamports,
-                &mut account_data.data,
-                &account_data.owner,
-                account_data.executable,
-                account_data.rent_epoch,
-            );
+            let duplicate_ix = dedup_ixs.insert(account_meta.pubkey, i as u16);
+            match duplicate_ix {
+                Some(i_orig_ix) => accounts_ser.push(SerializeAccountCustom::Duplicate(i_orig_ix)),
+                None => {
+                    let account_info = AccountInfo::new(
+                        &account_meta.pubkey,
+                        account_meta.is_signer,
+                        account_meta.is_writable,
+                        &mut account_data.lamports,
+                        &mut account_data.data,
+                        &account_data.owner,
+                        account_data.executable,
+                        account_data.rent_epoch,
+                    );
 
-            accounts_ser.push(SerializeAccountCustom::Account(i as u16, account_info));
+                    accounts_ser.push(SerializeAccountCustom::Account(i as u16, account_info));
+                }
+            }
         }
 
         let mut parameter_bytes = serialize_parameters_aligned_custom2(
@@ -422,8 +374,6 @@ impl FuzzClient for LighClient {
             unsafe { deserialize(&mut parameter_bytes.as_slice_mut()[0] as *mut u8) };
 
         let result = (self.entry)(&instruction.program_id, &account_infos, &instruction.data);
-        println!("### IXS DATA: {:?}", &instruction.data);
-        println!("### ACCOUNTS LEN: {}", account_infos.len());
         match result {
             Ok(_) => {
                 for account in account_infos.iter() {
@@ -438,14 +388,12 @@ impl FuzzClient for LighClient {
                         account_data.data = account.data.borrow().to_vec();
                         account_data.lamports = account.lamports.borrow().to_owned();
                         account_data.owner = account.owner.to_owned();
-                        println!("### SAVING ACCOUNT...");
                         // TODO check data can be resized
                         // TODO check data can be changed
                         // TODO check lamports sum is constant
                         // }
                     }
                 }
-                println!("### RETURNING...");
                 Ok(())
             }
             Err(_e) => Err(FuzzClientError::Custom(10)), // FIXME The ProgramError has to be propagated here
