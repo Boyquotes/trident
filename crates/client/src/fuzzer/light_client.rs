@@ -410,14 +410,13 @@ impl FuzzClient for LighClient {
             accounts_ser.push(SerializeAccountCustom::Account(i as u16, account_info));
         }
 
-        let (mut parameter_bytes, _regions, _account_lengths) =
-            serialize_parameters_aligned_custom(
-                accounts_ser,
-                &instruction.data,
-                &instruction.program_id,
-                true,
-            )
-            .unwrap();
+        let mut parameter_bytes = serialize_parameters_aligned_custom2(
+            accounts_ser,
+            &instruction.data,
+            &instruction.program_id,
+            true,
+        )
+        .unwrap();
 
         let (_program_id, account_infos, _input) =
             unsafe { deserialize(&mut parameter_bytes.as_slice_mut()[0] as *mut u8) };
@@ -464,20 +463,12 @@ enum SerializeAccountCustom<'info> {
     Duplicate(IndexOfAccount),
 }
 
-fn serialize_parameters_aligned_custom(
+fn serialize_parameters_aligned_custom2(
     accounts: Vec<SerializeAccountCustom>,
     instruction_data: &[u8],
     program_id: &Pubkey,
     copy_account_data: bool,
-) -> Result<
-    (
-        AlignedMemory<HOST_ALIGN>,
-        Vec<MemoryRegion>,
-        Vec<SerializedAccountMetadata>,
-    ),
-    InstructionError,
-> {
-    let mut accounts_metadata = Vec::with_capacity(accounts.len());
+) -> Result<AlignedMemory<HOST_ALIGN>, InstructionError> {
     // Calculate size in order to alloc once
     let mut size = size_of::<u64>();
     for account in &accounts {
@@ -508,7 +499,7 @@ fn serialize_parameters_aligned_custom(
     + instruction_data.len()
     + size_of::<Pubkey>(); // program id;
 
-    let mut s = SerializerCustom::new(size, MM_INPUT_START, true, copy_account_data);
+    let mut s = SerializerCustomLight::new(size, true, copy_account_data);
 
     // Serialize into the buffer
     s.write::<u64>((accounts.len() as u64).to_le());
@@ -520,22 +511,14 @@ fn serialize_parameters_aligned_custom(
                 s.write::<u8>(borrowed_account.is_writable as u8);
                 s.write::<u8>(borrowed_account.executable as u8);
                 s.write_all(&[0u8, 0, 0, 0]);
-                let vm_key_addr = s.write_all(borrowed_account.key.as_ref());
-                let vm_owner_addr = s.write_all(borrowed_account.owner.as_ref());
-                let vm_lamports_addr = s.write::<u64>(borrowed_account.lamports().to_le());
+                s.write_all(borrowed_account.key.as_ref());
+                s.write_all(borrowed_account.owner.as_ref());
+                s.write::<u64>(borrowed_account.lamports().to_le());
                 s.write::<u64>((borrowed_account.data_len() as u64).to_le());
-                let vm_data_addr = s.write_account(&mut borrowed_account)?;
+                s.write_account(&mut borrowed_account)?;
                 s.write::<u64>((borrowed_account.rent_epoch).to_le());
-                accounts_metadata.push(SerializedAccountMetadata {
-                    original_data_len: borrowed_account.data_len(),
-                    vm_key_addr,
-                    vm_owner_addr,
-                    vm_lamports_addr,
-                    vm_data_addr,
-                });
             }
             SerializeAccountCustom::Duplicate(position) => {
-                accounts_metadata.push(accounts_metadata.get(position as usize).unwrap().clone());
                 s.write::<u8>(position as u8);
                 s.write_all(&[0u8, 0, 0, 0, 0, 0, 0]);
             }
@@ -545,30 +528,19 @@ fn serialize_parameters_aligned_custom(
     s.write_all(instruction_data);
     s.write_all(program_id.as_ref());
 
-    let (mem, regions) = s.finish();
-    Ok((mem, regions, accounts_metadata))
+    let mem = s.finish();
+    Ok(mem)
 }
 
-struct SerializerCustom {
+struct SerializerCustomLight {
     pub buffer: AlignedMemory<HOST_ALIGN>,
-    regions: Vec<MemoryRegion>,
-    vaddr: u64,
-    region_start: usize,
     aligned: bool,
     copy_account_data: bool,
 }
-impl SerializerCustom {
-    fn new(
-        size: usize,
-        start_addr: u64,
-        aligned: bool,
-        copy_account_data: bool,
-    ) -> SerializerCustom {
-        SerializerCustom {
+impl SerializerCustomLight {
+    fn new(size: usize, aligned: bool, copy_account_data: bool) -> SerializerCustomLight {
+        SerializerCustomLight {
             buffer: AlignedMemory::with_capacity(size),
-            regions: Vec::new(),
-            region_start: 0,
-            vaddr: start_addr,
             aligned,
             copy_account_data,
         }
@@ -578,12 +550,7 @@ impl SerializerCustom {
         self.buffer.fill_write(num, value)
     }
 
-    pub fn write<T: Pod>(&mut self, value: T) -> u64 {
-        self.debug_assert_alignment::<T>();
-        let vaddr = self
-            .vaddr
-            .saturating_add(self.buffer.len() as u64)
-            .saturating_sub(self.region_start as u64);
+    pub fn write<T: Pod>(&mut self, value: T) {
         // Safety:
         // in serialize_parameters_(aligned|unaligned) first we compute the
         // required size then we write into the newly allocated buffer. There's
@@ -595,34 +562,19 @@ impl SerializerCustom {
         unsafe {
             self.buffer.write_unchecked(value);
         }
-
-        vaddr
     }
 
-    fn write_all(&mut self, value: &[u8]) -> u64 {
-        let vaddr = self
-            .vaddr
-            .saturating_add(self.buffer.len() as u64)
-            .saturating_sub(self.region_start as u64);
+    fn write_all(&mut self, value: &[u8]) {
         // Safety:
         // see write() - the buffer is guaranteed to be large enough
         unsafe {
             self.buffer.write_all_unchecked(value);
         }
-
-        vaddr
     }
 
-    fn write_account(&mut self, account: &mut AccountInfo<'_>) -> Result<u64, InstructionError> {
-        let vm_data_addr = if self.copy_account_data {
-            let vm_data_addr = self.vaddr.saturating_add(self.buffer.len() as u64);
+    fn write_account(&mut self, account: &mut AccountInfo<'_>) -> Result<(), InstructionError> {
+        if self.copy_account_data {
             self.write_all(*account.data.borrow());
-            vm_data_addr
-        } else {
-            self.push_region(true);
-            let vaddr = self.vaddr;
-            self.push_account_data_region(account)?;
-            vaddr
         };
 
         if self.aligned {
@@ -638,75 +590,13 @@ impl SerializerCustom {
                 // too.
                 self.fill_write(MAX_PERMITTED_DATA_INCREASE + BPF_ALIGN_OF_U128, 0)
                     .map_err(|_| InstructionError::InvalidArgument)?;
-                self.region_start += BPF_ALIGN_OF_U128.saturating_sub(align_offset);
-                // put the realloc padding in its own region
-
-                // self.push_region(account.can_data_be_changed().is_ok()); // FIXME
-                self.push_region(true);
             }
-        }
-
-        Ok(vm_data_addr)
-    }
-
-    fn push_account_data_region(
-        &mut self,
-        account: &mut AccountInfo<'_>,
-    ) -> Result<(), InstructionError> {
-        if !account.data_is_empty() {
-            // let region = match account_data_region_memory_state(account) { // FIXME
-            let region = match MemoryState::Writable {
-                MemoryState::Readable => {
-                    MemoryRegion::new_readonly(*account.data.borrow(), self.vaddr)
-                }
-                MemoryState::Writable => {
-                    MemoryRegion::new_writable(*account.data.borrow_mut(), self.vaddr)
-                }
-                MemoryState::Cow(index_in_transaction) => {
-                    MemoryRegion::new_cow(*account.data.borrow(), self.vaddr, index_in_transaction)
-                }
-            };
-            self.vaddr += region.len;
-            self.regions.push(region);
         }
 
         Ok(())
     }
 
-    fn push_region(&mut self, writable: bool) {
-        let range = self.region_start..self.buffer.len();
-        let region = if writable {
-            MemoryRegion::new_writable(
-                self.buffer.as_slice_mut().get_mut(range.clone()).unwrap(),
-                self.vaddr,
-            )
-        } else {
-            MemoryRegion::new_readonly(
-                self.buffer.as_slice().get(range.clone()).unwrap(),
-                self.vaddr,
-            )
-        };
-        self.regions.push(region);
-        self.region_start = range.end;
-        self.vaddr += range.len() as u64;
-    }
-
-    fn finish(mut self) -> (AlignedMemory<HOST_ALIGN>, Vec<MemoryRegion>) {
-        self.push_region(true);
-        debug_assert_eq!(self.region_start, self.buffer.len());
-        (self.buffer, self.regions)
-    }
-
-    fn debug_assert_alignment<T>(&self) {
-        debug_assert!(
-            !self.aligned
-                || self
-                    .buffer
-                    .as_slice()
-                    .as_ptr_range()
-                    .end
-                    .align_offset(mem::align_of::<T>())
-                    == 0
-        );
+    fn finish(self) -> AlignedMemory<HOST_ALIGN> {
+        self.buffer
     }
 }
