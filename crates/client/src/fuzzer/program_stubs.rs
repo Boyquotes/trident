@@ -1,3 +1,5 @@
+use core::slice;
+
 use serde::{Deserialize, Serialize};
 use solana_program::{
     clock::UnixTimestamp, entrypoint::ProgramResult, slot_history::Slot, stake_history::Epoch,
@@ -41,13 +43,14 @@ impl program_stubs::SyscallStubs for TestSyscallStubs {
             match instruction {
                 SystemInstruction::CreateAccount {
                     lamports,
-                    space: _,
+                    space,
                     owner,
                 } => {
                     self.sol_log("Processing CreateAccount");
                     subtract_lamports(&account_infos[0], lamports);
                     add_lamports(&account_infos[1], lamports);
                     assign(&account_infos[1], &owner);
+                    account_infos[1].realloc(space as usize, false)?;
                     Ok(())
                 }
                 SystemInstruction::CreateAccountWithSeed {
@@ -171,6 +174,43 @@ impl program_stubs::SyscallStubs for TestSyscallStubs {
     //     1
     // }
 }
+
+// fn realloc<'info>(selfX: &AccountInfo<'info>, new_len: usize, zero_init: bool) -> Result<()> {
+//         let mut data = selfX.try_borrow_mut_data()?;
+//         let old_len = data.len();
+
+//         // Return early if length hasn't changed
+//         if new_len == old_len {
+//             return Ok(());
+//         }
+
+//         // Return early if the length increase from the original serialized data
+//         // length is too large and would result in an out of bounds allocation.
+//         let original_data_len = unsafe { selfX.original_data_len() };
+//         if new_len.saturating_sub(original_data_len) > 10240 {
+//             return Err(ProgramError::InvalidRealloc.into());
+//         }
+
+//         // realloc
+//         unsafe {
+//             let data_ptr = data.as_mut_ptr();
+
+//             // // First set new length in the serialized data
+//             *(data_ptr.offset(-8) as *mut u64) = new_len as u64;
+
+//             // // Then recreate the local slice with the new length
+//             *data = from_raw_parts_mut(data_ptr, new_len)
+//         }
+
+//         if zero_init {
+//             let len_increase = new_len.saturating_sub(old_len);
+//             if len_increase > 0 {
+//                 sol_memset(&mut data[old_len..], 0, len_increase);
+//             }
+//         }
+
+//         Ok(())
+//     }
 
 pub fn subtract_lamports(from: &AccountInfo, lamports: u64) {
     let from_lamports = from.lamports();

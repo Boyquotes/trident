@@ -7,90 +7,92 @@ pub mod fuzz_example3_fuzz_instructions {
         WithdrawUnlocked(WithdrawUnlocked),
     }
 
-impl FuzzTestExecutor<FuzzAccounts> for FuzzInstruction {
-    fn run_fuzzer(
-        &self,
-        program_id: Pubkey,
-        accounts: &RefCell<FuzzAccounts>,
-        client: &mut impl FuzzClient,
-    ) -> core::result::Result<(), Box<dyn std::error::Error + 'static>> {
-        match self {
-            FuzzInstruction::InitVesting(ix) => {
-                let (mut signers, metas) = ix
-                    .get_accounts(client, &mut accounts.borrow_mut())
-                    .map_err(|e| e.with_origin(Origin::Instruction(self.to_context_string())))
-                    .expect("Accounts calculation expect");
-                let mut snaphot = Snapshot::new(&metas, ix);
-                snaphot.capture_before(client).unwrap();
-                let data = ix
-                    .get_data(client, &mut accounts.borrow_mut())
-                    .map_err(|e| e.with_origin(Origin::Instruction(self.to_context_string())))
-                    .expect("Data calculation expect");
-                let ixx = Instruction {
-                    program_id,
-                    accounts: metas.clone(),
-                    data: data.data(),
-                };
-                let ix_res = client.process_instruction(ixx);
-                eprintln!("### IX PROCESSED");
-                if ix_res.is_ok() {
-                    snaphot.capture_after(client).unwrap();
-                    let (acc_before, acc_after) = snaphot
-                        .get_snapshot()
+    impl FuzzTestExecutor<FuzzAccounts> for FuzzInstruction {
+        fn run_fuzzer(
+            &self,
+            program_id: Pubkey,
+            accounts: &RefCell<FuzzAccounts>,
+            client: &mut impl FuzzClient,
+        ) -> core::result::Result<(), Box<dyn std::error::Error + 'static>> {
+            match self {
+                FuzzInstruction::InitVesting(ix) => {
+                    let (mut signers, metas) = ix
+                        .get_accounts(client, &mut accounts.borrow_mut())
                         .map_err(|e| e.with_origin(Origin::Instruction(self.to_context_string())))
-                        .expect("Snapshot deserialization expect");
-                    if let Err(e) = ix
-                        .check(acc_before, acc_after, data)
+                        .expect("Accounts calculation expect");
+                    let mut snaphot = Snapshot::new(&metas, ix);
+                    snaphot.capture_before(client).unwrap();
+                    let data = ix
+                        .get_data(client, &mut accounts.borrow_mut())
                         .map_err(|e| e.with_origin(Origin::Instruction(self.to_context_string())))
-                    {
-                        eprintln!(
+                        .expect("Data calculation expect");
+                    let ixx = Instruction {
+                        program_id,
+                        accounts: metas.clone(),
+                        data: data.data(),
+                    };
+                    let ix_res = client.process_instruction(ixx);
+                    eprintln!("### IX PROCESSED");
+                    if ix_res.is_ok() {
+                        snaphot.capture_after(client).unwrap();
+                        let (acc_before, acc_after) = snaphot
+                            .get_snapshot()
+                            .map_err(|e| {
+                                e.with_origin(Origin::Instruction(self.to_context_string()))
+                            })
+                            .expect("Snapshot deserialization expect");
+                        if let Err(e) = ix.check(acc_before, acc_after, data).map_err(|e| {
+                            e.with_origin(Origin::Instruction(self.to_context_string()))
+                        }) {
+                            eprintln!(
                             "CRASH DETECTED! Custom check after the {} instruction did not pass!",
                             self.to_context_string()
                         );
-                        panic!("{}", e)
+                            panic!("{}", e)
+                        }
                     }
                 }
-            }
-            FuzzInstruction::WithdrawUnlocked(ix) => {
-                let (mut signers, metas) = ix
-                    .get_accounts(client, &mut accounts.borrow_mut())
-                    .map_err(|e| e.with_origin(Origin::Instruction(self.to_context_string())))
-                    .expect("Accounts calculation expect");
-                let mut snaphot = Snapshot::new(&metas, ix);
-                snaphot.capture_before(client).unwrap();
-                let data = ix
-                    .get_data(client, &mut accounts.borrow_mut())
-                    .map_err(|e| e.with_origin(Origin::Instruction(self.to_context_string())))
-                    .expect("Data calculation expect");
-                let ixx = Instruction {
-                    program_id,
-                    accounts: metas.clone(),
-                    data: data.data(),
-                };
-                let ix_res = client.process_instruction(ixx);
-                eprintln!("### IX PROCESSED");
-                if ix_res.is_ok() {
-                    snaphot.capture_after(client).unwrap();
-                    let (acc_before, acc_after) = snaphot
-                        .get_snapshot()
+                FuzzInstruction::WithdrawUnlocked(ix) => {
+                    let (mut signers, metas) = ix
+                        .get_accounts(client, &mut accounts.borrow_mut())
                         .map_err(|e| e.with_origin(Origin::Instruction(self.to_context_string())))
-                        .expect("Snapshot deserialization expect");
-                    if let Err(e) = ix
-                        .check(acc_before, acc_after, data)
+                        .expect("Accounts calculation expect");
+                    let mut snaphot = Snapshot::new(&metas, ix);
+                    snaphot.capture_before(client).unwrap();
+                    let data = ix
+                        .get_data(client, &mut accounts.borrow_mut())
                         .map_err(|e| e.with_origin(Origin::Instruction(self.to_context_string())))
-                    {
-                        eprintln!(
+                        .expect("Data calculation expect");
+                    let ixx = Instruction {
+                        program_id,
+                        accounts: metas.clone(),
+                        data: data.data(),
+                    };
+                    let ix_res = client.process_instruction(ixx);
+                    eprintln!("### IX PROCESSED");
+                    if ix_res.is_ok() {
+                        snaphot.capture_after(client).unwrap();
+                        let (acc_before, acc_after) = snaphot
+                            .get_snapshot()
+                            .map_err(|e| {
+                                e.with_origin(Origin::Instruction(self.to_context_string()))
+                            })
+                            .expect("Snapshot deserialization expect");
+                        if let Err(e) = ix.check(acc_before, acc_after, data).map_err(|e| {
+                            e.with_origin(Origin::Instruction(self.to_context_string()))
+                        }) {
+                            eprintln!(
                             "CRASH DETECTED! Custom check after the {} instruction did not pass!",
                             self.to_context_string()
                         );
-                        panic!("{}", e)
+                            panic!("{}", e)
+                        }
                     }
                 }
             }
+            Ok(())
         }
-        Ok(())
     }
-}
     #[derive(Arbitrary, Debug)]
     pub struct InitVesting {
         pub accounts: InitVestingAccounts,
@@ -203,14 +205,14 @@ impl FuzzTestExecutor<FuzzAccounts> for FuzzInstruction {
                 client,
                 10 * LAMPORTS_PER_SOL,
             );
+
             let escrow = fuzz_accounts
                 .escrow
-                .get_or_create_data_account(
+                .get_or_create_account(
                     self.accounts.escrow,
-                    client,
+                    // client,
                     &[recipient.pubkey().as_ref(), b"ESCROW_SEED"],
                     &fuzz_example3::ID,
-                    8 + 1 + 32 + 5 * 8,
                 )
                 .unwrap();
 
@@ -290,12 +292,11 @@ impl FuzzTestExecutor<FuzzAccounts> for FuzzInstruction {
 
             let escrow = fuzz_accounts
                 .escrow
-                .get_or_create_data_account(
+                .get_or_create_account(
                     self.accounts.escrow,
-                    client,
+                    // client,
                     &[recipient.pubkey().as_ref(), b"ESCROW_SEED"],
                     &fuzz_example3::ID,
-                    8 + 1 + 32 + 5 * 8,
                 )
                 .unwrap();
 
@@ -303,7 +304,7 @@ impl FuzzTestExecutor<FuzzAccounts> for FuzzInstruction {
                 .escrow_pda_authority
                 .get_or_create_account(
                     self.accounts.escrow_pda_authority,
-                    client,
+                    // client,
                     &[b"ESCROW_PDA_AUTHORITY"],
                     &fuzz_example3::ID,
                 )
@@ -347,35 +348,50 @@ impl FuzzTestExecutor<FuzzAccounts> for FuzzInstruction {
                 let recipient = pre_ix.recipient;
                 let recipient_token_account_pre = pre_ix.recipient_token_account;
                 let recipient_token_account_post = post_ix.recipient_token_account;
-                // if escrow.recipient == *recipient.key {
-                //     if recipient_token_account_pre.amount == recipient_token_account_post.amount {
-                //         // INFO Recipient was not able to withdraw
-                //         // return Err("Recipient was not able to withdraw any funds");
-                //         return Err(FuzzingError::BalanceMismatch);
-                //     } else if recipient_token_account_pre.amount + escrow.amount
-                //         != recipient_token_account_post.amount
-                //     {
-                //         if recipient_token_account_pre.amount + escrow.amount
-                //             > recipient_token_account_post.amount
-                //         {
-                //             // INFO The recipient was able to withdraw,
-                //             // but not as much as was initially intended.
-                //             // return Err("Recipient withdrew LESS");
-                //             return Err(FuzzingError::Custom(15));
-                //         } else {
-                //             // INFO The recipient was able to withdraw,
-                //             // but more as was initially intended.
-                //             // This option is possible because the program uses one token accout with corresponding mint
-                //             // across multiple Escrow Transactions, this means that we can actually withdraw more
-                //             // if prior to Withdraw call, was sufficient amount transferred to the escrow token account.
-                //             // (e.g. due to prior Initialization of different Escrow Transactions)
-                //             // For testing purposes inside debug use eprintln!()
-                //             // return Err("Recipient withdrew MORE");
-                //             return Err(FuzzingError::Custom(2));
-                //         }
-                //     }
-                // }
+                eprintln!(
+                    "recipient_token_account_pre.amount = {}",
+                    recipient_token_account_pre.amount
+                );
+                eprintln!(
+                    "recipient_token_account_post.amount = {}",
+                    recipient_token_account_post.amount
+                );
+                eprintln!("escrow.amount = {}", escrow.amount);
+                if escrow.recipient == *recipient.key {
+                    if recipient_token_account_pre.amount == recipient_token_account_post.amount {
+                        // INFO Recipient was not able to withdraw
+                        // return Err("Recipient was not able to withdraw any funds");
+                        eprintln!("FuzzingError::BalanceMismatch");
+                        return Err(FuzzingError::BalanceMismatch);
+                    } else if recipient_token_account_pre.amount + escrow.amount
+                        != recipient_token_account_post.amount
+                    {
+                        if recipient_token_account_pre.amount + escrow.amount
+                            > recipient_token_account_post.amount
+                        {
+                            // eprintln!("recipient_token_account_pre.amount = {}", recipient_token_account_pre.amount);
+                            // eprintln!("recipient_token_account_post.amount = {}", recipient_token_account_post.amount);
+                            // INFO The recipient was able to withdraw,
+                            // but not as much as was initially intended.
+                            // return Err("Recipient withdrew LESS");
+                            eprintln!("FuzzingError::Custom(15)");
+                            return Err(FuzzingError::Custom(15));
+                        } else {
+                            // INFO The recipient was able to withdraw,
+                            // but more as was initially intended.
+                            // This option is possible because the program uses one token accout with corresponding mint
+                            // across multiple Escrow Transactions, this means that we can actually withdraw more
+                            // if prior to Withdraw call, was sufficient amount transferred to the escrow token account.
+                            // (e.g. due to prior Initialization of different Escrow Transactions)
+                            // For testing purposes inside debug use eprintln!()
+                            // return Err("Recipient withdrew MORE");
+                            eprintln!("FuzzingError::Custom(2)");
+                            return Err(FuzzingError::Custom(2));
+                        }
+                    }
+                }
             }
+            eprintln!("WITHDRAW CHECK PASSED...");
             Ok(())
         }
     }

@@ -70,20 +70,6 @@ impl AccountsStorage<Keypair> {
             .or_insert_with(|| client.set_account(lamports));
         key.insecure_clone()
     }
-    pub fn get_or_create_data_account(
-        &mut self,
-        account_id: AccountId,
-        client: &mut impl FuzzClient,
-        lamports: u64,
-        space: usize,
-    ) -> Keypair {
-        if self.accounts.get(&account_id).is_none() {
-            let key = client.set_data_account(lamports, space);
-            self.accounts.insert(account_id, key);
-        }
-        let key = self.accounts.get(&account_id).unwrap();
-        key.insecure_clone()
-    }
 }
 
 impl AccountsStorage<TokenStore> {
@@ -137,30 +123,20 @@ impl AccountsStorage<PdaStore> {
     pub fn get_or_create_account(
         &mut self,
         account_id: AccountId,
-        client: &mut impl FuzzClient,
         seeds: &[&[u8]],
         program_id: &Pubkey,
     ) -> Option<&PdaStore> {
-        if self.accounts.get(&account_id).is_none() {
-            let pda_store = client.set_pda_account(seeds, program_id).unwrap();
-            self.accounts.insert(account_id, pda_store);
-        }
-        self.accounts.get(&account_id)
-    }
-    pub fn get_or_create_data_account(
-        &mut self,
-        account_id: AccountId,
-        client: &mut impl FuzzClient,
-        seeds: &[&[u8]],
-        program_id: &Pubkey,
-        space: usize,
-    ) -> Option<&PdaStore> {
-        if self.accounts.get(&account_id).is_none() {
-            let pda_store = client
-                .set_pda_data_account(seeds, program_id, space)
-                .unwrap();
-            self.accounts.insert(account_id, pda_store);
-        }
-        self.accounts.get(&account_id)
+        let key = self.accounts.entry(account_id).or_insert(
+            if let Some((key, _)) = Pubkey::try_find_program_address(seeds, program_id) {
+                let seeds_vec: Vec<_> = seeds.iter().map(|&s| s.to_vec()).collect();
+                PdaStore {
+                    pubkey: key,
+                    seeds: seeds_vec,
+                }
+            } else {
+                return None;
+            },
+        );
+        Some(key)
     }
 }
