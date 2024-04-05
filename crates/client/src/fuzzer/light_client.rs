@@ -80,14 +80,16 @@ impl std::default::Default for TridentAccount {
 
 pub struct LighClient {
     pub entry: ProgramEntry,
-    pub account_storage: RefCell<HashMap<Pubkey, TridentAccount>>,
+    // pub account_storage: RefCell<HashMap<Pubkey, TridentAccount>>,
+    pub account_storage2: HashMap<Pubkey, TridentAccount>,
 }
 
 impl LighClient {
     pub fn new(entry: ProgramEntry, program_id: Pubkey) -> Result<Self, FuzzClientError> {
         let mut new_client = Self {
             entry,
-            account_storage: RefCell::new(HashMap::default()),
+            // account_storage: RefCell::new(HashMap::default()),
+            account_storage2: HashMap::new(),
         };
         new_client.add_program(solana_sdk::system_program::ID);
         new_client.add_program(anchor_spl::token::ID);
@@ -97,7 +99,8 @@ impl LighClient {
         Ok(new_client)
     }
     pub fn clean_ctx(&mut self) -> Result<(), FuzzClientError> {
-        self.account_storage = RefCell::new(HashMap::default());
+        // self.account_storage = RefCell::new(HashMap::default());
+        self.account_storage2 = HashMap::new();
 
         self.add_program(solana_sdk::system_program::ID);
         self.add_program(anchor_spl::token::ID);
@@ -113,8 +116,8 @@ impl LighClient {
             .map(|m| {
                 (
                     m.clone(),
-                    self.account_storage
-                        .borrow()
+                    self.account_storage2
+                        // .borrow()
                         .get(&m.pubkey)
                         .unwrap()
                         .clone(),
@@ -129,8 +132,8 @@ impl LighClient {
             executable: true,
             ..Default::default()
         };
-        self.account_storage
-            .borrow_mut()
+        self.account_storage2
+            // .borrow_mut()
             .insert(program_id, program);
     }
 }
@@ -140,8 +143,8 @@ impl FuzzClient for LighClient {
         Ok(solana_sdk::rent::Rent::default())
     }
     fn set_account_custom(&mut self, address: &Pubkey, account: &AccountSharedData) {
-        self.account_storage
-            .borrow_mut()
+        self.account_storage2
+            // .borrow_mut()
             .insert(*address, account.to_owned().into());
     }
 
@@ -150,22 +153,12 @@ impl FuzzClient for LighClient {
 
         let new_account_info = TridentAccount::new(lamports, 0, &solana_sdk::system_program::ID);
 
-        self.account_storage
-            .borrow_mut()
+        self.account_storage2
+            // .borrow_mut()
             .insert(new_account.pubkey(), new_account_info);
         new_account
     }
-    fn set_data_account(&mut self, lamports: u64, space: usize) -> Keypair {
-        let new_account = Keypair::new();
 
-        let new_account_info =
-            TridentAccount::new(lamports, space, &solana_sdk::system_program::ID);
-
-        self.account_storage
-            .borrow_mut()
-            .insert(new_account.pubkey(), new_account_info);
-        new_account
-    }
     fn set_pda_account(
         &mut self,
         seeds: &[&[u8]],
@@ -173,27 +166,9 @@ impl FuzzClient for LighClient {
     ) -> std::option::Option<PdaStore> {
         if let Some((key, _)) = Pubkey::try_find_program_address(seeds, program_id) {
             let empty_account = TridentAccount::default();
-            self.account_storage.borrow_mut().insert(key, empty_account);
-            let seeds_vec: Vec<_> = seeds.iter().map(|&s| s.to_vec()).collect();
-            Some(PdaStore {
-                pubkey: key,
-                seeds: seeds_vec,
-            })
-        } else {
-            None
-        }
-    }
-    fn set_pda_data_account(
-        &mut self,
-        seeds: &[&[u8]],
-        program_id: &Pubkey,
-        space: usize,
-    ) -> Option<PdaStore> {
-        if let Some((key, _)) = Pubkey::try_find_program_address(seeds, program_id) {
-            let allocated_account = TridentAccount::new(0, space, &solana_sdk::system_program::ID);
-            self.account_storage
-                .borrow_mut()
-                .insert(key, allocated_account);
+            self.account_storage2
+                // .borrow_mut()
+                .insert(key, empty_account);
             let seeds_vec: Vec<_> = seeds.iter().map(|&s| s.to_vec()).collect();
             Some(PdaStore {
                 pubkey: key,
@@ -252,8 +227,8 @@ impl FuzzClient for LighClient {
         spl_token::state::Account::pack(token_account, &mut data[..]).unwrap();
         account.set_data_from_slice(&data);
 
-        self.account_storage
-            .borrow_mut()
+        self.account_storage2
+            // .borrow_mut()
             .insert(token_account_key, account);
 
         token_account_key
@@ -289,8 +264,8 @@ impl FuzzClient for LighClient {
         Mint::pack(mint, &mut data[..]).unwrap();
         account.set_data_from_slice(&data);
         // self.ctx.set_account(&mint_account.pubkey(), &account);
-        self.account_storage
-            .borrow_mut()
+        self.account_storage2
+            // .borrow_mut()
             .insert(mint_account_key, account);
 
         mint_account_key
@@ -304,17 +279,17 @@ impl FuzzClient for LighClient {
         &mut self,
         key: &anchor_client::anchor_lang::prelude::Pubkey,
     ) -> Result<Option<solana_sdk::account::Account>, FuzzClientError> {
-        let storage = self.account_storage.borrow();
-        let account = storage.get(key).ok_or(FuzzClientError::CannotGetAccounts)?;
-
-        let account = Account {
-            lamports: account.lamports,
-            data: account.data.clone(),
-            owner: account.owner,
-            executable: account.executable,
-            rent_epoch: account.rent_epoch,
-        };
-        Ok(Some(account.clone()))
+        let storage = &self.account_storage2; //.borrow();
+        match storage.get(key) {
+            Some(account) => Ok(Some(Account {
+                lamports: account.lamports,
+                data: account.data.clone(),
+                owner: account.owner,
+                executable: account.executable,
+                rent_epoch: account.rent_epoch,
+            })),
+            None => Ok(None),
+        }
     }
 
     fn get_accounts(
@@ -335,40 +310,182 @@ impl FuzzClient for LighClient {
         todo!()
     }
 
+    // fn process_instruction(&mut self, instruction: Instruction) -> Result<(), FuzzClientError> {
+    //     let mut accounts_ser = vec![];
+
+    //     let mut temporary_account_storage = self.get_temporary_accounts(&instruction.accounts);
+
+    //     let mut dedup_ixs: HashMap<Pubkey, u16> = HashMap::new();
+    //     for (i, (account_meta, account_data)) in temporary_account_storage.iter_mut().enumerate() {
+    //         let duplicate_ix = dedup_ixs.insert(account_meta.pubkey, i as u16);
+    //         match duplicate_ix {
+    //             Some(i_orig_ix) => accounts_ser.push(SerializeAccountCustom::Duplicate(i_orig_ix)),
+    //             None => {
+    //                 let account_info = AccountInfo::new(
+    //                     &account_meta.pubkey,
+    //                     account_meta.is_signer,
+    //                     account_meta.is_writable,
+    //                     &mut account_data.lamports,
+    //                     &mut account_data.data,
+    //                     &account_data.owner,
+    //                     account_data.executable,
+    //                     account_data.rent_epoch,
+    //                 );
+
+    //                 accounts_ser.push(SerializeAccountCustom::Account(i as u16, account_info));
+    //             }
+    //         }
+    //     }
+
+    //     let mut parameter_bytes = serialize_parameters_aligned_custom2(
+    //         accounts_ser,
+    //         &instruction.data,
+    //         &instruction.program_id,
+    //         true,
+    //     )
+    //     .unwrap();
+
+    //     let (_program_id, account_infos, _input) =
+    //         unsafe { deserialize(&mut parameter_bytes.as_slice_mut()[0] as *mut u8) };
+
+    //     let result = (self.entry)(&instruction.program_id, &account_infos, &instruction.data);
+    //     match result {
+    //         Ok(_) => {
+    //             for account in account_infos.iter() {
+    //                 if account.is_writable {
+    //                     let mut storage = self.account_storage.borrow_mut();
+    //                     let account_data = storage.get_mut(account.key).unwrap();
+    //                     // if is_closed(account) {
+    //                     //     // FIXME closed account must have no balance (0 lamports) - why not to remove the account from storage?
+    //                     //     account_data.lamports = account.lamports.borrow_mut().to_owned();
+    //                     //     println!("### ACCOUNT CLOSED...");
+    //                     // } else {
+    //                     account_data.data = account.data.borrow().to_vec();
+    //                     account_data.lamports = account.lamports.borrow().to_owned();
+    //                     account_data.owner = account.owner.to_owned();
+    //                     // TODO check data can be resized
+    //                     // TODO check data can be changed
+    //                     // TODO check lamports sum is constant
+    //                     // }
+    //                 }
+    //             }
+    //             Ok(())
+    //         }
+    //         Err(_e) => Err(FuzzClientError::Custom(10)), // FIXME The ProgramError has to be propagated here
+    //     }
+    // }
+
     fn process_instruction(&mut self, instruction: Instruction) -> Result<(), FuzzClientError> {
-        let mut accounts_ser = vec![];
+        // let mut accounts_ser = vec![];
 
-        let mut temporary_account_storage = self.get_temporary_accounts(&instruction.accounts);
+        // let mut temporary_account_storage = self.get_temporary_accounts(&instruction.accounts);
 
-        let mut dedup_ixs: HashMap<Pubkey, u16> = HashMap::new();
-        for (i, (account_meta, account_data)) in temporary_account_storage.iter_mut().enumerate() {
-            let duplicate_ix = dedup_ixs.insert(account_meta.pubkey, i as u16);
-            match duplicate_ix {
-                Some(i_orig_ix) => accounts_ser.push(SerializeAccountCustom::Duplicate(i_orig_ix)),
-                None => {
-                    let account_info = AccountInfo::new(
-                        &account_meta.pubkey,
-                        account_meta.is_signer,
-                        account_meta.is_writable,
-                        &mut account_data.lamports,
-                        &mut account_data.data,
-                        &account_data.owner,
-                        account_data.executable,
-                        account_data.rent_epoch,
-                    );
+        let mut dedup_ixs: HashMap<Pubkey, usize> =
+            HashMap::with_capacity(instruction.accounts.len());
 
-                    accounts_ser.push(SerializeAccountCustom::Account(i as u16, account_info));
-                }
+        for (i, account_meta) in instruction.accounts.iter().enumerate() {
+            if dedup_ixs.get(&account_meta.pubkey).is_none() {
+                dedup_ixs.insert(account_meta.pubkey, i);
             }
+            // dedup_ixs.entry(account_meta.pubkey).or_insert(i as u16);
         }
 
-        let mut parameter_bytes = serialize_parameters_aligned_custom2(
-            accounts_ser,
-            &instruction.data,
-            &instruction.program_id,
-            true,
-        )
-        .unwrap();
+        // We expect duplicate accounts will be only minority so we return references to all accounts
+        let account_refs = &instruction
+            .accounts
+            .iter()
+            .map(|m| self.account_storage2.get(&m.pubkey))
+            .collect::<Vec<_>>();
+        // TODO we are cloning here...
+        // let account_refs: Option<Vec<_>> = account_refs.iter().cloned().collect();
+        // TODO handle None as error
+        // let account_refs = account_refs.unwrap();
+        let duplicate_accounts = instruction.accounts.len() - dedup_ixs.len();
+        let mut size = 8 * duplicate_accounts;
+        for &acc in account_refs.iter() {
+            let data_len = match acc {
+                Some(acc) => acc.data.len(),
+                None => 0,
+            };
+            size += size_of::<u8>() // is_signer
+                + size_of::<u8>() // is_writable
+                + size_of::<u8>() // executable
+                + size_of::<u32>() // original_data_len
+                + size_of::<Pubkey>()  // key
+                + size_of::<Pubkey>() // owner
+                + size_of::<u64>()  // lamports
+                + size_of::<u64>()  // data len
+                + MAX_PERMITTED_DATA_INCREASE
+                + size_of::<u64>(); // rent epoch
+            size += data_len + (data_len as *const u8).align_offset(BPF_ALIGN_OF_U128);
+        }
+        // TODO this is to remove if deserialization is adapted
+        size += size_of::<u64>() // data len
+        + instruction.data.len()
+        + size_of::<Pubkey>(); // program id;
+                               // FIX Only for tests
+        size += 32;
+
+        let mut s = SerializerCustomLight::new(size, true, true);
+
+        // Serialize into the buffer
+        s.write::<u64>((instruction.accounts.len() as u64).to_le());
+        for (i, (account_meta, account)) in
+            instruction.accounts.iter().zip(account_refs).enumerate()
+        {
+            // We can unwrap, it should never be None.
+            let position = dedup_ixs.get(&account_meta.pubkey).unwrap();
+
+            if i == *position {
+                // first occurence of the account
+                match account {
+                    Some(account) => {
+                        s.write::<u8>(NON_DUP_MARKER);
+                        s.write::<u8>(account_meta.is_signer as u8);
+                        s.write::<u8>(account_meta.is_writable as u8);
+                        s.write::<u8>(account.executable as u8);
+                        s.write_all(&[0u8, 0, 0, 0]);
+                        s.write_all(account_meta.pubkey.as_ref());
+                        s.write_all(account.owner.as_ref());
+                        s.write::<u64>(account.lamports.to_le());
+                        s.write::<u64>((account.data.len() as u64).to_le());
+                        s.write_account_custom(account).unwrap();
+                        s.write::<u64>((account.rent_epoch).to_le());
+                    }
+                    None => {
+                        let account = TridentAccount::default();
+                        s.write::<u8>(NON_DUP_MARKER);
+                        s.write::<u8>(account_meta.is_signer as u8);
+                        s.write::<u8>(account_meta.is_writable as u8);
+                        s.write::<u8>(account.executable as u8);
+                        s.write_all(&[0u8, 0, 0, 0]);
+                        s.write_all(account_meta.pubkey.as_ref());
+                        s.write_all(account.owner.as_ref());
+                        s.write::<u64>(account.lamports.to_le());
+                        s.write::<u64>((account.data.len() as u64).to_le());
+                        s.write_account_custom(&account).unwrap();
+                        s.write::<u64>((account.rent_epoch).to_le());
+                    }
+                };
+            } else {
+                // it is a duplicate
+                s.write::<u8>(*position as u8);
+                s.write_all(&[0u8, 0, 0, 0, 0, 0, 0]);
+            }
+        }
+        s.write::<u64>((instruction.data.len() as u64).to_le());
+        s.write_all(&instruction.data);
+        s.write_all(instruction.program_id.as_ref());
+
+        let mut parameter_bytes = s.finish();
+
+        // let mut parameter_bytes = serialize_parameters_aligned_custom2(
+        //     accounts_ser,
+        //     &instruction.data,
+        //     &instruction.program_id,
+        //     true,
+        // )
+        // .unwrap();
 
         let (_program_id, account_infos, _input) =
             unsafe { deserialize(&mut parameter_bytes.as_slice_mut()[0] as *mut u8) };
@@ -378,20 +495,25 @@ impl FuzzClient for LighClient {
             Ok(_) => {
                 for account in account_infos.iter() {
                     if account.is_writable {
-                        let mut storage = self.account_storage.borrow_mut();
-                        let account_data = storage.get_mut(account.key).unwrap();
-                        // if is_closed(account) {
-                        //     // FIXME closed account must have no balance (0 lamports) - why not to remove the account from storage?
-                        //     account_data.lamports = account.lamports.borrow_mut().to_owned();
-                        //     println!("### ACCOUNT CLOSED...");
-                        // } else {
-                        account_data.data = account.data.borrow().to_vec();
-                        account_data.lamports = account.lamports.borrow().to_owned();
-                        account_data.owner = account.owner.to_owned();
-                        // TODO check data can be resized
-                        // TODO check data can be changed
-                        // TODO check lamports sum is constant
-                        // }
+                        // let mut storage = &self.account_storage2;//.borrow_mut();
+
+                        if is_closed(account) {
+                            // FIXME closed account must have no balance (0 lamports) - why not to remove the account from storage?
+                            // TODO if we remove the account, what about AccountStorage?
+                            self.account_storage2.remove(account.key);
+                            // account_data.lamports = account.lamports.borrow_mut().to_owned();
+                            println!("### ACCOUNT CLOSED...");
+                        } else {
+                            println!("### UPDATING ACCOUNT...");
+                            // let account_data = self.account_storage2.get_mut(account.key).unwrap();
+                            let account_data =
+                                self.account_storage2.entry(*account.key).or_default();
+                            account_data.data = account.data.borrow().to_vec();
+                            account_data.lamports = account.lamports.borrow().to_owned();
+                            account_data.owner = account.owner.to_owned();
+                            // TODO check data can be resized
+                            // TODO check lamports sum is constant
+                        }
                     }
                 }
                 Ok(())
@@ -403,7 +525,9 @@ impl FuzzClient for LighClient {
 
 // mimic anchor_lang
 pub fn is_closed(info: &AccountInfo) -> bool {
-    info.owner == &solana_system_program::id() && info.data_is_empty() // FIXME lamports must also be set to 0
+    // info.owner == &solana_system_program::id() && info.data_is_empty() // FIXME lamports must also be set to 0
+    info.owner == &solana_system_program::id() && info.data_is_empty() && info.lamports() == 0
+    // FIXME lamports must also be set to 0
 }
 
 enum SerializeAccountCustom<'info> {
@@ -540,6 +664,30 @@ impl SerializerCustomLight {
                     .map_err(|_| InstructionError::InvalidArgument)?;
             }
         }
+
+        Ok(())
+    }
+
+    fn write_account_custom(&mut self, account: &TridentAccount) -> Result<(), InstructionError> {
+        // if self.copy_account_data {
+        self.write_all(&account.data);
+        // };
+
+        // if self.aligned {
+        let align_offset = (account.data.len() as *const u8).align_offset(BPF_ALIGN_OF_U128);
+        // if self.copy_account_data {
+        self.fill_write(MAX_PERMITTED_DATA_INCREASE + align_offset, 0)
+            .map_err(|_| InstructionError::InvalidArgument)?;
+        // } else {
+        //     // The deserialization code is going to align the vm_addr to
+        //     // BPF_ALIGN_OF_U128. Always add one BPF_ALIGN_OF_U128 worth of
+        //     // padding and shift the start of the next region, so that once
+        //     // vm_addr is aligned, the corresponding host_addr is aligned
+        //     // too.
+        //     self.fill_write(MAX_PERMITTED_DATA_INCREASE + BPF_ALIGN_OF_U128, 0)
+        //         .map_err(|_| InstructionError::InvalidArgument)?;
+        // }
+        // }
 
         Ok(())
     }

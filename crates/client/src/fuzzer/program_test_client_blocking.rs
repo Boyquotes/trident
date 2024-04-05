@@ -173,18 +173,6 @@ impl FuzzClient for ProgramTestClientBlocking {
         Ok(self.rt.block_on(self.ctx.banks_client.get_rent())?)
     }
 
-    fn set_data_account(&mut self, _lamports: u64, _space: usize) -> Keypair {
-        todo!("Only implemented for LightClient")
-    }
-
-    fn set_pda_data_account(
-        &mut self,
-        _seeds: &[&[u8]],
-        _program_id: &Pubkey,
-        _space: usize,
-    ) -> Option<PdaStore> {
-        todo!("Only implemented for LightClient")
-    }
     fn set_pda_account(&mut self, _seeds: &[&[u8]], _program_id: &Pubkey) -> Option<PdaStore> {
         todo!("Only implemented for LightClient")
     }

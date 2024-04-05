@@ -221,16 +221,7 @@ pub trait FuzzClient {
     /// Create an empty account and add lamports to it
     fn set_account(&mut self, lamports: u64) -> Keypair;
 
-    fn set_data_account(&mut self, lamports: u64, space: usize) -> Keypair;
-
     fn set_pda_account(&mut self, seeds: &[&[u8]], program_id: &Pubkey) -> Option<PdaStore>;
-
-    fn set_pda_data_account(
-        &mut self,
-        seeds: &[&[u8]],
-        program_id: &Pubkey,
-        space: usize,
-    ) -> Option<PdaStore>;
 
     /// Create an SPL token account
     #[allow(clippy::too_many_arguments)]
@@ -259,6 +250,7 @@ pub trait FuzzClient {
     /// Get the account at the given address
     fn get_account(&mut self, key: &Pubkey) -> Result<Option<Account>, FuzzClientError>;
 
+    // TODO remove from this trait and place it elsewhere
     /// Get accounts based on the supplied meta information
     fn get_accounts(
         &mut self,
