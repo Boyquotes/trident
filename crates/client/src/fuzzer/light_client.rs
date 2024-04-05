@@ -1,6 +1,8 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::mem::size_of;
+use std::rc::Rc;
+use std::slice::{from_raw_parts, from_raw_parts_mut};
 
 use solana_program::entrypoint::{
     deserialize, BPF_ALIGN_OF_U128, MAX_PERMITTED_DATA_INCREASE, NON_DUP_MARKER,
@@ -376,10 +378,6 @@ impl FuzzClient for LighClient {
     // }
 
     fn process_instruction(&mut self, instruction: Instruction) -> Result<(), FuzzClientError> {
-        // let mut accounts_ser = vec![];
-
-        // let mut temporary_account_storage = self.get_temporary_accounts(&instruction.accounts);
-
         let mut dedup_ixs: HashMap<Pubkey, usize> =
             HashMap::with_capacity(instruction.accounts.len());
 
@@ -387,7 +385,6 @@ impl FuzzClient for LighClient {
             if dedup_ixs.get(&account_meta.pubkey).is_none() {
                 dedup_ixs.insert(account_meta.pubkey, i);
             }
-            // dedup_ixs.entry(account_meta.pubkey).or_insert(i as u16);
         }
 
         // We expect duplicate accounts will be only minority so we return references to all accounts
@@ -396,10 +393,6 @@ impl FuzzClient for LighClient {
             .iter()
             .map(|m| self.account_storage2.get(&m.pubkey))
             .collect::<Vec<_>>();
-        // TODO we are cloning here...
-        // let account_refs: Option<Vec<_>> = account_refs.iter().cloned().collect();
-        // TODO handle None as error
-        // let account_refs = account_refs.unwrap();
         let duplicate_accounts = instruction.accounts.len() - dedup_ixs.len();
         let mut size = 8 * duplicate_accounts;
         for &acc in account_refs.iter() {
@@ -419,11 +412,8 @@ impl FuzzClient for LighClient {
                 + size_of::<u64>(); // rent epoch
             size += data_len + (data_len as *const u8).align_offset(BPF_ALIGN_OF_U128);
         }
-        // TODO this is to remove if deserialization is adapted
-        size += size_of::<u64>() // data len
-        + instruction.data.len()
-        + size_of::<Pubkey>(); // program id;
-                               // FIX Only for tests
+
+        // FIX Safety bump, verify correct allignment.
         size += 32;
 
         let mut s = SerializerCustomLight::new(size, true, true);
@@ -473,22 +463,11 @@ impl FuzzClient for LighClient {
                 s.write_all(&[0u8, 0, 0, 0, 0, 0, 0]);
             }
         }
-        s.write::<u64>((instruction.data.len() as u64).to_le());
-        s.write_all(&instruction.data);
-        s.write_all(instruction.program_id.as_ref());
 
         let mut parameter_bytes = s.finish();
 
-        // let mut parameter_bytes = serialize_parameters_aligned_custom2(
-        //     accounts_ser,
-        //     &instruction.data,
-        //     &instruction.program_id,
-        //     true,
-        // )
-        // .unwrap();
-
-        let (_program_id, account_infos, _input) =
-            unsafe { deserialize(&mut parameter_bytes.as_slice_mut()[0] as *mut u8) };
+        let account_infos =
+            unsafe { deserialize_custom(&mut parameter_bytes.as_slice_mut()[0] as *mut u8) };
 
         let result = (self.entry)(&instruction.program_id, &account_infos, &instruction.data);
         match result {
@@ -498,7 +477,6 @@ impl FuzzClient for LighClient {
                         // let mut storage = &self.account_storage2;//.borrow_mut();
 
                         if is_closed(account) {
-                            // FIXME closed account must have no balance (0 lamports) - why not to remove the account from storage?
                             // TODO if we remove the account, what about AccountStorage?
                             self.account_storage2.remove(account.key);
                             // account_data.lamports = account.lamports.borrow_mut().to_owned();
@@ -523,11 +501,98 @@ impl FuzzClient for LighClient {
     }
 }
 
-// mimic anchor_lang
+/// Deserialize the input arguments
+///
+/// The integer arithmetic in this method is safe when called on a buffer that was
+/// serialized by Trident. Use with buffers serialized otherwise is unsupported and
+/// done at one's own risk.
+///
+/// # Safety
+pub unsafe fn deserialize_custom<'a>(input: *mut u8) -> Vec<AccountInfo<'a>> {
+    let mut offset: usize = 0;
+
+    // Number of accounts present
+
+    #[allow(clippy::cast_ptr_alignment)]
+    let num_accounts = *(input.add(offset) as *const u64) as usize;
+    offset += size_of::<u64>();
+
+    // Account Infos
+
+    let mut accounts = Vec::with_capacity(num_accounts);
+    for _ in 0..num_accounts {
+        let dup_info = *(input.add(offset) as *const u8);
+        offset += size_of::<u8>();
+        if dup_info == NON_DUP_MARKER {
+            #[allow(clippy::cast_ptr_alignment)]
+            let is_signer = *(input.add(offset) as *const u8) != 0;
+            offset += size_of::<u8>();
+
+            #[allow(clippy::cast_ptr_alignment)]
+            let is_writable = *(input.add(offset) as *const u8) != 0;
+            offset += size_of::<u8>();
+
+            #[allow(clippy::cast_ptr_alignment)]
+            let executable = *(input.add(offset) as *const u8) != 0;
+            offset += size_of::<u8>();
+
+            // The original data length is stored here because these 4 bytes were
+            // originally only used for padding and served as a good location to
+            // track the original size of the account data in a compatible way.
+            let original_data_len_offset = offset;
+            offset += size_of::<u32>();
+
+            let key: &Pubkey = &*(input.add(offset) as *const Pubkey);
+            offset += size_of::<Pubkey>();
+
+            let owner: &Pubkey = &*(input.add(offset) as *const Pubkey);
+            offset += size_of::<Pubkey>();
+
+            #[allow(clippy::cast_ptr_alignment)]
+            let lamports = Rc::new(RefCell::new(&mut *(input.add(offset) as *mut u64)));
+            offset += size_of::<u64>();
+
+            #[allow(clippy::cast_ptr_alignment)]
+            let data_len = *(input.add(offset) as *const u64) as usize;
+            offset += size_of::<u64>();
+
+            // Store the original data length for detecting invalid reallocations and
+            // requires that MAX_PERMITTED_DATA_LENGTH fits in a u32
+            *(input.add(original_data_len_offset) as *mut u32) = data_len as u32;
+
+            let data = Rc::new(RefCell::new({
+                from_raw_parts_mut(input.add(offset), data_len)
+            }));
+            offset += data_len + MAX_PERMITTED_DATA_INCREASE;
+            offset += (offset as *const u8).align_offset(BPF_ALIGN_OF_U128); // padding
+
+            #[allow(clippy::cast_ptr_alignment)]
+            let rent_epoch = *(input.add(offset) as *const u64);
+            offset += size_of::<u64>();
+
+            accounts.push(AccountInfo {
+                key,
+                is_signer,
+                is_writable,
+                lamports,
+                data,
+                owner,
+                executable,
+                rent_epoch,
+            });
+        } else {
+            offset += 7; // padding
+
+            // Duplicate account, clone the original
+            accounts.push(accounts[dup_info as usize].clone());
+        }
+    }
+
+    accounts
+}
+
 pub fn is_closed(info: &AccountInfo) -> bool {
-    // info.owner == &solana_system_program::id() && info.data_is_empty() // FIXME lamports must also be set to 0
     info.owner == &solana_system_program::id() && info.data_is_empty() && info.lamports() == 0
-    // FIXME lamports must also be set to 0
 }
 
 enum SerializeAccountCustom<'info> {
@@ -669,25 +734,10 @@ impl SerializerCustomLight {
     }
 
     fn write_account_custom(&mut self, account: &TridentAccount) -> Result<(), InstructionError> {
-        // if self.copy_account_data {
         self.write_all(&account.data);
-        // };
-
-        // if self.aligned {
         let align_offset = (account.data.len() as *const u8).align_offset(BPF_ALIGN_OF_U128);
-        // if self.copy_account_data {
         self.fill_write(MAX_PERMITTED_DATA_INCREASE + align_offset, 0)
             .map_err(|_| InstructionError::InvalidArgument)?;
-        // } else {
-        //     // The deserialization code is going to align the vm_addr to
-        //     // BPF_ALIGN_OF_U128. Always add one BPF_ALIGN_OF_U128 worth of
-        //     // padding and shift the start of the next region, so that once
-        //     // vm_addr is aligned, the corresponding host_addr is aligned
-        //     // too.
-        //     self.fill_write(MAX_PERMITTED_DATA_INCREASE + BPF_ALIGN_OF_U128, 0)
-        //         .map_err(|_| InstructionError::InvalidArgument)?;
-        // }
-        // }
 
         Ok(())
     }
