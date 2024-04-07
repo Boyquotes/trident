@@ -394,13 +394,16 @@ impl FuzzClient for LighClient {
             .map(|m| self.account_storage2.get(&m.pubkey))
             .collect::<Vec<_>>();
         let duplicate_accounts = instruction.accounts.len() - dedup_ixs.len();
-        let mut size = 8 * duplicate_accounts;
+        let mut size = size_of::<u64>(); // number of accounts
+        size += 8 * duplicate_accounts; // Duplicate accounts are represented by 1 byte duplicate flag plus 7 padding bytes to 64-aligned.
         for &acc in account_refs.iter() {
             let data_len = match acc {
                 Some(acc) => acc.data.len(),
                 None => 0,
             };
-            size += size_of::<u8>() // is_signer
+            // This block is 64-bit aligned
+            size += size_of::<u8>() // duplicate flag
+                + size_of::<u8>() // is_signer
                 + size_of::<u8>() // is_writable
                 + size_of::<u8>() // executable
                 + size_of::<u32>() // original_data_len
@@ -412,9 +415,6 @@ impl FuzzClient for LighClient {
                 + size_of::<u64>(); // rent epoch
             size += data_len + (data_len as *const u8).align_offset(BPF_ALIGN_OF_U128);
         }
-
-        // FIX Safety bump, verify correct allignment.
-        size += 32;
 
         let mut s = SerializerCustomLight::new(size, true, true);
 
