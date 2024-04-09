@@ -153,6 +153,32 @@ impl program_stubs::SyscallStubs for TestSyscallStubs {
                 &new_account_infos,
                 &instruction.data,
             )
+        } else if instruction.program_id == spl_associated_token_account::ID {
+            let signers = signers_seeds
+                .iter()
+                .map(|seeds| Pubkey::create_program_address(seeds, &self.caller).unwrap())
+                .collect::<Vec<_>>();
+
+            let mut new_account_infos = vec![];
+            for meta in instruction.accounts.iter() {
+                for account_info in account_infos.iter() {
+                    if meta.pubkey == *account_info.key {
+                        let mut new_account_info = account_info.clone();
+                        new_account_info.is_signer = true;
+                        for signer in signers.iter() {
+                            if *account_info.key == *signer {
+                                new_account_info.is_signer = true;
+                            }
+                        }
+                        new_account_infos.push(new_account_info);
+                    }
+                }
+            }
+            spl_associated_token_account::processor::process_instruction(
+                &instruction.program_id,
+                &new_account_infos,
+                &instruction.data,
+            )
         } else {
             let message = format!(
                 "SyscallStubs: sol_invoke_signed() for {} not available",
