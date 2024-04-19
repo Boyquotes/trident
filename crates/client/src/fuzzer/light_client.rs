@@ -95,6 +95,7 @@ impl LighClient {
         };
         new_client.add_program(solana_sdk::system_program::ID);
         new_client.add_program(anchor_spl::token::ID);
+        new_client.add_program(anchor_spl::associated_token::ID);
 
         test_syscall_stubs(program_id);
 
@@ -106,6 +107,7 @@ impl LighClient {
 
         self.add_program(solana_sdk::system_program::ID);
         self.add_program(anchor_spl::token::ID);
+        self.add_program(anchor_spl::associated_token::ID);
 
         Ok(())
     }

@@ -134,6 +134,43 @@ impl program_stubs::SyscallStubs for TestSyscallStubs {
                     Ok(())
                 }
             }
+        } else if instruction.program_id == spl_associated_token_account::ID {
+            // TODO this should be done one at the beginning for all the cases
+            let signers;
+            {
+                let mut callers = self.callers.write().unwrap(); // FIX this should be done at the begining for all instructions
+                let caller = *callers.last().unwrap();
+                callers.push(instruction.program_id);
+
+                signers = signers_seeds
+                    .iter()
+                    .map(|seeds| Pubkey::create_program_address(seeds, &caller).unwrap()) // FIX check who should be the program_id
+                    .collect::<Vec<_>>();
+            }
+
+            let mut new_account_infos = vec![];
+            for meta in instruction.accounts.iter() {
+                for account_info in account_infos.iter() {
+                    if meta.pubkey == *account_info.key {
+                        let mut new_account_info = account_info.clone();
+                        for signer in signers.iter() {
+                            if *account_info.key == *signer {
+                                new_account_info.is_signer = true;
+                            }
+                        }
+                        new_account_infos.push(new_account_info);
+                        break;
+                    }
+                }
+            }
+            let res = spl_associated_token_account::processor::process_instruction(
+                &instruction.program_id,
+                &new_account_infos,
+                &instruction.data,
+            );
+            let mut callers = self.callers.write().unwrap();
+            callers.pop();
+            res
         } else if instruction.program_id == spl_token::ID {
             let signers;
             {
