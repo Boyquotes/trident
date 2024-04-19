@@ -1,4 +1,4 @@
-use core::slice;
+use std::sync::{Arc, RwLock};
 
 use serde::{Deserialize, Serialize};
 use solana_program::{
@@ -14,7 +14,14 @@ use solana_sdk_macro::CloneZeroed;
 use solana_sdk::program_stubs;
 
 struct TestSyscallStubs {
-    pub caller: Pubkey,
+    pub callers: Arc<RwLock<Vec<Pubkey>>>,
+    pub data: Arc<RwLock<TransactionReturnData>>,
+}
+
+#[derive(Default)]
+pub struct TransactionReturnData {
+    pub program_id: Pubkey,
+    pub data: Vec<u8>,
 }
 
 impl program_stubs::SyscallStubs for TestSyscallStubs {
@@ -128,10 +135,17 @@ impl program_stubs::SyscallStubs for TestSyscallStubs {
                 }
             }
         } else if instruction.program_id == spl_token::ID {
-            let signers = signers_seeds
-                .iter()
-                .map(|seeds| Pubkey::create_program_address(seeds, &self.caller).unwrap())
-                .collect::<Vec<_>>();
+            let signers;
+            {
+                let mut callers = self.callers.write().unwrap();
+                let caller = *callers.last().unwrap();
+                callers.push(instruction.program_id);
+
+                signers = signers_seeds
+                    .iter()
+                    .map(|seeds| Pubkey::create_program_address(seeds, &caller).unwrap())
+                    .collect::<Vec<_>>();
+            }
 
             let mut new_account_infos = vec![];
             for meta in instruction.accounts.iter() {
@@ -148,11 +162,14 @@ impl program_stubs::SyscallStubs for TestSyscallStubs {
                     }
                 }
             }
-            spl_token::processor::Processor::process(
+            let res = spl_token::processor::Processor::process(
                 &instruction.program_id,
                 &new_account_infos,
                 &instruction.data,
-            )
+            );
+            let mut callers = self.callers.write().unwrap();
+            callers.pop();
+            res
         } else {
             let message = format!(
                 "SyscallStubs: sol_invoke_signed() for {} not available",
@@ -170,47 +187,27 @@ impl program_stubs::SyscallStubs for TestSyscallStubs {
         }
     }
 
+    fn sol_set_return_data(&self, _data: &[u8]) {
+        let mut data = self.data.write().unwrap();
+        let caller = self.callers.read().unwrap();
+        let caller = caller.last().unwrap();
+        let d = TransactionReturnData {
+            program_id: *caller,
+            data: _data.to_vec(),
+        };
+        *data = d;
+    }
+
+    fn sol_get_return_data(&self) -> Option<(Pubkey, Vec<u8>)> {
+        let data = self.data.read().ok()?;
+        let (program_id, data) = (data.program_id, data.data.to_owned());
+        Some((program_id, data))
+    }
+
     // fn sol_get_stack_height(&self) -> u64 {
     //     1
     // }
 }
-
-// fn realloc<'info>(selfX: &AccountInfo<'info>, new_len: usize, zero_init: bool) -> Result<()> {
-//         let mut data = selfX.try_borrow_mut_data()?;
-//         let old_len = data.len();
-
-//         // Return early if length hasn't changed
-//         if new_len == old_len {
-//             return Ok(());
-//         }
-
-//         // Return early if the length increase from the original serialized data
-//         // length is too large and would result in an out of bounds allocation.
-//         let original_data_len = unsafe { selfX.original_data_len() };
-//         if new_len.saturating_sub(original_data_len) > 10240 {
-//             return Err(ProgramError::InvalidRealloc.into());
-//         }
-
-//         // realloc
-//         unsafe {
-//             let data_ptr = data.as_mut_ptr();
-
-//             // // First set new length in the serialized data
-//             *(data_ptr.offset(-8) as *mut u64) = new_len as u64;
-
-//             // // Then recreate the local slice with the new length
-//             *data = from_raw_parts_mut(data_ptr, new_len)
-//         }
-
-//         if zero_init {
-//             let len_increase = new_len.saturating_sub(old_len);
-//             if len_increase > 0 {
-//                 sol_memset(&mut data[old_len..], 0, len_increase);
-//             }
-//         }
-
-//         Ok(())
-//     }
 
 pub fn subtract_lamports(from: &AccountInfo, lamports: u64) {
     let from_lamports = from.lamports();
@@ -251,7 +248,10 @@ pub fn test_syscall_stubs(program_id: Pubkey) {
     static ONCE: Once = Once::new();
 
     ONCE.call_once(|| {
-        program_stubs::set_syscall_stubs(Box::new(TestSyscallStubs { caller: program_id }));
+        program_stubs::set_syscall_stubs(Box::new(TestSyscallStubs {
+            callers: Arc::new(RwLock::new(vec![program_id])),
+            data: Arc::new(RwLock::new(TransactionReturnData::default())),
+        }));
     });
 }
 
