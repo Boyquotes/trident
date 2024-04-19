@@ -138,13 +138,13 @@ impl program_stubs::SyscallStubs for TestSyscallStubs {
                 for account_info in account_infos.iter() {
                     if meta.pubkey == *account_info.key {
                         let mut new_account_info = account_info.clone();
-                        new_account_info.is_signer = true;
                         for signer in signers.iter() {
                             if *account_info.key == *signer {
                                 new_account_info.is_signer = true;
                             }
                         }
                         new_account_infos.push(new_account_info);
+                        break;
                     }
                 }
             }
