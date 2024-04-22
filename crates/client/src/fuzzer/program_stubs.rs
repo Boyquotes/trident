@@ -1,4 +1,7 @@
-use std::sync::{Arc, RwLock};
+use std::{
+    mem::transmute,
+    sync::{Arc, RwLock},
+};
 
 use serde::{Deserialize, Serialize};
 use solana_program::{
@@ -12,6 +15,8 @@ use solana_sdk_macro::CloneZeroed;
 
 #[allow(deprecated)]
 use solana_sdk::program_stubs;
+
+use crate::light_client::get_light_client;
 
 struct TestSyscallStubs {
     pub callers: Arc<RwLock<Vec<Pubkey>>>,
@@ -41,8 +46,6 @@ impl program_stubs::SyscallStubs for TestSyscallStubs {
         signers_seeds: &[&[&[u8]]],
     ) -> ProgramResult {
         if instruction.program_id == solana_program::system_program::ID {
-            // let entry = solana_system_program::system_processor::Entrypoint::rust();
-            // let ctx = InvokeContext{};
             let instruction =
                 solana_sdk::program_utils::limited_deserialize(&instruction.data).unwrap();
             // TODO It may be correct to implement this as
@@ -134,86 +137,56 @@ impl program_stubs::SyscallStubs for TestSyscallStubs {
                     Ok(())
                 }
             }
-        } else if instruction.program_id == spl_associated_token_account::ID {
-            // TODO this should be done one at the beginning for all the cases
-            let signers;
-            {
-                let mut callers = self.callers.write().unwrap(); // FIX this should be done at the begining for all instructions
-                let caller = *callers.last().unwrap();
-                callers.push(instruction.program_id);
-
-                signers = signers_seeds
-                    .iter()
-                    .map(|seeds| Pubkey::create_program_address(seeds, &caller).unwrap()) // FIX check who should be the program_id
-                    .collect::<Vec<_>>();
-            }
-
-            let mut new_account_infos = vec![];
-            for meta in instruction.accounts.iter() {
-                for account_info in account_infos.iter() {
-                    if meta.pubkey == *account_info.key {
-                        let mut new_account_info = account_info.clone();
-                        for signer in signers.iter() {
-                            if *account_info.key == *signer {
-                                new_account_info.is_signer = true;
-                            }
-                        }
-                        new_account_infos.push(new_account_info);
-                        break;
-                    }
-                }
-            }
-            let res = spl_associated_token_account::processor::process_instruction(
-                &instruction.program_id,
-                &new_account_infos,
-                &instruction.data,
-            );
-            let mut callers = self.callers.write().unwrap();
-            callers.pop();
-            res
-        } else if instruction.program_id == spl_token::ID {
-            let signers;
-            {
-                let mut callers = self.callers.write().unwrap();
-                let caller = *callers.last().unwrap();
-                callers.push(instruction.program_id);
-
-                signers = signers_seeds
-                    .iter()
-                    .map(|seeds| Pubkey::create_program_address(seeds, &caller).unwrap())
-                    .collect::<Vec<_>>();
-            }
-
-            let mut new_account_infos = vec![];
-            for meta in instruction.accounts.iter() {
-                for account_info in account_infos.iter() {
-                    if meta.pubkey == *account_info.key {
-                        let mut new_account_info = account_info.clone();
-                        for signer in signers.iter() {
-                            if *account_info.key == *signer {
-                                new_account_info.is_signer = true;
-                            }
-                        }
-                        new_account_infos.push(new_account_info);
-                        break;
-                    }
-                }
-            }
-            let res = spl_token::processor::Processor::process(
-                &instruction.program_id,
-                &new_account_infos,
-                &instruction.data,
-            );
-            let mut callers = self.callers.write().unwrap();
-            callers.pop();
-            res
         } else {
-            let message = format!(
-                "SyscallStubs: sol_invoke_signed() for {} not available",
-                instruction.program_id
-            );
-            self.sol_log(&message);
-            Ok(())
+            let client = get_light_client();
+            match client.programs.get(&instruction.program_id) {
+                Some(process_function) => {
+                    let signers;
+                    {
+                        let mut callers = self.callers.write().unwrap(); // FIX this should be done at the begining for all instructions
+                        let caller = *callers.last().unwrap();
+                        callers.push(instruction.program_id);
+
+                        signers = signers_seeds
+                            .iter()
+                            .map(|seeds| Pubkey::create_program_address(seeds, &caller).unwrap()) // FIX check who should be the program_id
+                            .collect::<Vec<_>>();
+                    }
+
+                    let mut new_account_infos = vec![];
+                    for meta in instruction.accounts.iter() {
+                        for account_info in account_infos.iter() {
+                            if meta.pubkey == *account_info.key {
+                                let mut new_account_info = account_info.clone();
+                                for signer in signers.iter() {
+                                    if *account_info.key == *signer {
+                                        new_account_info.is_signer = true;
+                                    }
+                                }
+                                new_account_infos.push(new_account_info);
+                                break;
+                            }
+                        }
+                    }
+
+                    let res = process_function(
+                        &instruction.program_id,
+                        &new_account_infos,
+                        &instruction.data,
+                    );
+                    let mut callers = self.callers.write().unwrap();
+                    callers.pop();
+                    res
+                }
+                None => {
+                    let message = format!(
+                        "SyscallStubs: sol_invoke_signed() for {} not available",
+                        instruction.program_id
+                    );
+                    self.sol_log(&message);
+                    Ok(())
+                }
+            }
         }
     }
     fn sol_get_clock_sysvar(&self, var_addr: *mut u8) -> u64 {

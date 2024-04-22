@@ -1,11 +1,12 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::mem::size_of;
+use std::mem::{size_of, transmute};
 use std::rc::Rc;
 use std::slice::{from_raw_parts, from_raw_parts_mut};
+use std::sync::{Arc, RwLock};
 
 use solana_program::entrypoint::{
-    deserialize, BPF_ALIGN_OF_U128, MAX_PERMITTED_DATA_INCREASE, NON_DUP_MARKER,
+    deserialize, ProcessInstruction, BPF_ALIGN_OF_U128, MAX_PERMITTED_DATA_INCREASE, NON_DUP_MARKER,
 };
 use solana_program::instruction::InstructionError;
 use solana_program::{instruction::AccountMeta, program_pack::Pack, rent::Rent};
@@ -32,7 +33,7 @@ pub type ProgramEntry = for<'info> fn(
 ) -> anchor_lang::solana_program::entrypoint::ProgramResult;
 
 #[repr(C)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 
 pub struct TridentAccount {
     pub lamports: u64,
@@ -74,44 +75,71 @@ impl From<AccountSharedData> for TridentAccount {
     }
 }
 
-impl std::default::Default for TridentAccount {
-    fn default() -> Self {
-        TridentAccount::new(0, 0, &solana_sdk::system_program::ID)
-    }
+thread_local! {
+    pub static LIGHT_CLIENT: RefCell<Option<usize>> = RefCell::new(None);
+}
+fn set_light_client(new: &LighClient) {
+    LIGHT_CLIENT.with(|client| unsafe { client.replace(Some(transmute::<_, usize>(new))) });
+}
+pub(crate) fn get_light_client<'a>() -> &'a LighClient {
+    let ptr = LIGHT_CLIENT.with(|client| match *client.borrow() {
+        Some(val) => val,
+        None => panic!("Light client not set! Maybe you have to call init() first."),
+    });
+    unsafe { transmute::<usize, &LighClient>(ptr) }
 }
 
 pub struct LighClient {
+    // FIX rename to LighTClient
     pub entry: ProgramEntry,
     // pub account_storage: RefCell<HashMap<Pubkey, TridentAccount>>,
     pub account_storage2: HashMap<Pubkey, TridentAccount>,
+    pub programs: HashMap<Pubkey, ProcessInstruction>,
 }
 
 impl LighClient {
     pub fn new(entry: ProgramEntry, program_id: Pubkey) -> Result<Self, FuzzClientError> {
         let mut new_client = Self {
             entry,
-            // account_storage: RefCell::new(HashMap::default()),
             account_storage2: HashMap::new(),
+            programs: HashMap::new(),
         };
-        new_client.add_program(solana_sdk::system_program::ID);
-        new_client.add_program(anchor_spl::token::ID);
-        new_client.add_program(anchor_spl::associated_token::ID);
+        new_client.add_system_program();
+        new_client.add_program(
+            anchor_spl::token::ID,
+            spl_token::processor::Processor::process,
+        );
+        new_client.add_program(
+            anchor_spl::associated_token::ID,
+            spl_associated_token_account::processor::process_instruction,
+        );
 
         test_syscall_stubs(program_id);
 
         Ok(new_client)
     }
     pub fn clean_ctx(&mut self) -> Result<(), FuzzClientError> {
-        // self.account_storage = RefCell::new(HashMap::default());
         self.account_storage2 = HashMap::new();
 
-        self.add_program(solana_sdk::system_program::ID);
-        self.add_program(anchor_spl::token::ID);
-        self.add_program(anchor_spl::associated_token::ID);
+        self.add_system_program();
+        self.add_program(
+            anchor_spl::token::ID,
+            spl_token::processor::Processor::process,
+        );
+        self.add_program(
+            anchor_spl::associated_token::ID,
+            spl_associated_token_account::processor::process_instruction,
+        );
 
         Ok(())
     }
+
+    pub fn init(&self) {
+        set_light_client(self);
+    }
+
     pub fn get_temporary_accounts(
+        // TODO remove
         &self,
         metas: &[AccountMeta],
     ) -> Vec<(AccountMeta, TridentAccount)> {
@@ -120,25 +148,38 @@ impl LighClient {
             .map(|m| {
                 (
                     m.clone(),
-                    self.account_storage2
-                        // .borrow()
-                        .get(&m.pubkey)
-                        .unwrap()
-                        .clone(),
+                    self.account_storage2.get(&m.pubkey).unwrap().clone(),
                 )
             })
             .collect();
         result
     }
 
-    pub fn add_program(&mut self, program_id: Pubkey) {
+    fn add_system_program(&mut self) {
+        let rent = Rent::default().minimum_balance(0).max(1);
         let program = TridentAccount {
             executable: true,
+            lamports: rent,
             ..Default::default()
         };
         self.account_storage2
-            // .borrow_mut()
-            .insert(program_id, program);
+            .insert(solana_sdk::system_program::ID, program);
+    }
+
+    pub fn add_program(
+        &mut self,
+        program_id: Pubkey,
+        process_function: solana_sdk::entrypoint::ProcessInstruction,
+    ) {
+        self.programs.insert(program_id, process_function);
+
+        let rent = Rent::default().minimum_balance(0).max(1);
+        let program = TridentAccount {
+            executable: true,
+            lamports: rent,
+            ..Default::default()
+        };
+        self.account_storage2.insert(program_id, program);
     }
 }
 
@@ -148,7 +189,6 @@ impl FuzzClient for LighClient {
     }
     fn set_account_custom(&mut self, address: &Pubkey, account: &AccountSharedData) {
         self.account_storage2
-            // .borrow_mut()
             .insert(*address, account.to_owned().into());
     }
 
@@ -158,7 +198,6 @@ impl FuzzClient for LighClient {
         let new_account_info = TridentAccount::new(lamports, 0, &solana_sdk::system_program::ID);
 
         self.account_storage2
-            // .borrow_mut()
             .insert(new_account.pubkey(), new_account_info);
         new_account
     }
