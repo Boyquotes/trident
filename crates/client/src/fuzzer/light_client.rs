@@ -2,14 +2,13 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::mem::{size_of, transmute};
 use std::rc::Rc;
-use std::slice::{from_raw_parts, from_raw_parts_mut};
-use std::sync::{Arc, RwLock};
+use std::slice::from_raw_parts_mut;
 
 use solana_program::entrypoint::{
-    deserialize, ProcessInstruction, BPF_ALIGN_OF_U128, MAX_PERMITTED_DATA_INCREASE, NON_DUP_MARKER,
+    ProcessInstruction, BPF_ALIGN_OF_U128, MAX_PERMITTED_DATA_INCREASE, NON_DUP_MARKER,
 };
 use solana_program::instruction::InstructionError;
-use solana_program::{instruction::AccountMeta, program_pack::Pack, rent::Rent};
+use solana_program::{program_pack::Pack, rent::Rent};
 use solana_program_runtime::solana_rbpf::aligned_memory::{AlignedMemory, Pod};
 use solana_program_runtime::solana_rbpf::ebpf::HOST_ALIGN;
 use solana_program_test_anchor_fix::IndexOfAccount;
@@ -76,32 +75,36 @@ impl From<AccountSharedData> for TridentAccount {
 }
 
 thread_local! {
+    /// Static pointer to LightClient so that we can access it from system program stubs
     pub static LIGHT_CLIENT: RefCell<Option<usize>> = RefCell::new(None);
 }
-fn set_light_client(new: &LighClient) {
+
+/// Sets the pointer to LightClient. This is necessary in order to access LightClient using 'get_light_client' method
+fn set_light_client(new: &LightClient) {
     LIGHT_CLIENT.with(|client| unsafe { client.replace(Some(transmute::<_, usize>(new))) });
 }
-pub(crate) fn get_light_client<'a>() -> &'a LighClient {
+
+/// Gets the pointer to LightClient
+pub(crate) fn get_light_client<'a>() -> &'a LightClient {
     let ptr = LIGHT_CLIENT.with(|client| match *client.borrow() {
         Some(val) => val,
         None => panic!("Light client not set! Maybe you have to call init() first."),
     });
-    unsafe { transmute::<usize, &LighClient>(ptr) }
+    unsafe { transmute::<usize, &LightClient>(ptr) }
 }
 
-pub struct LighClient {
-    // FIX rename to LighTClient
+pub struct LightClient {
     pub entry: ProgramEntry,
-    // pub account_storage: RefCell<HashMap<Pubkey, TridentAccount>>,
-    pub account_storage2: HashMap<Pubkey, TridentAccount>,
+    pub account_storage: HashMap<Pubkey, TridentAccount>,
     pub programs: HashMap<Pubkey, ProcessInstruction>,
 }
 
-impl LighClient {
+impl LightClient {
+    /// Create new LightClient instance with a program entrypoint. Call the `init()` method before using the client.
     pub fn new(entry: ProgramEntry, program_id: Pubkey) -> Result<Self, FuzzClientError> {
         let mut new_client = Self {
             entry,
-            account_storage2: HashMap::new(),
+            account_storage: HashMap::new(),
             programs: HashMap::new(),
         };
         new_client.add_system_program();
@@ -118,41 +121,10 @@ impl LighClient {
 
         Ok(new_client)
     }
-    pub fn clean_ctx(&mut self) -> Result<(), FuzzClientError> {
-        self.account_storage2 = HashMap::new();
 
-        self.add_system_program();
-        self.add_program(
-            anchor_spl::token::ID,
-            spl_token::processor::Processor::process,
-        );
-        self.add_program(
-            anchor_spl::associated_token::ID,
-            spl_associated_token_account::processor::process_instruction,
-        );
-
-        Ok(())
-    }
-
+    /// Initializes the LightClient before usage.
     pub fn init(&self) {
         set_light_client(self);
-    }
-
-    pub fn get_temporary_accounts(
-        // TODO remove
-        &self,
-        metas: &[AccountMeta],
-    ) -> Vec<(AccountMeta, TridentAccount)> {
-        let result: Vec<_> = metas
-            .iter()
-            .map(|m| {
-                (
-                    m.clone(),
-                    self.account_storage2.get(&m.pubkey).unwrap().clone(),
-                )
-            })
-            .collect();
-        result
     }
 
     fn add_system_program(&mut self) {
@@ -162,10 +134,14 @@ impl LighClient {
             lamports: rent,
             ..Default::default()
         };
-        self.account_storage2
+        self.account_storage
             .insert(solana_sdk::system_program::ID, program);
     }
 
+    /// Add new arbitrary program to the client.
+    ///
+    /// - `program_id` is the address of your program
+    /// - `process_function` is the closure that will be called to enter the program and process instructions
     pub fn add_program(
         &mut self,
         program_id: Pubkey,
@@ -179,16 +155,16 @@ impl LighClient {
             lamports: rent,
             ..Default::default()
         };
-        self.account_storage2.insert(program_id, program);
+        self.account_storage.insert(program_id, program);
     }
 }
 
-impl FuzzClient for LighClient {
+impl FuzzClient for LightClient {
     fn get_rent(&mut self) -> Result<Rent, FuzzClientError> {
         Ok(solana_sdk::rent::Rent::default())
     }
     fn set_account_custom(&mut self, address: &Pubkey, account: &AccountSharedData) {
-        self.account_storage2
+        self.account_storage
             .insert(*address, account.to_owned().into());
     }
 
@@ -197,7 +173,7 @@ impl FuzzClient for LighClient {
 
         let new_account_info = TridentAccount::new(lamports, 0, &solana_sdk::system_program::ID);
 
-        self.account_storage2
+        self.account_storage
             .insert(new_account.pubkey(), new_account_info);
         new_account
     }
@@ -209,9 +185,7 @@ impl FuzzClient for LighClient {
     ) -> std::option::Option<PdaStore> {
         if let Some((key, _)) = Pubkey::try_find_program_address(seeds, program_id) {
             let empty_account = TridentAccount::default();
-            self.account_storage2
-                // .borrow_mut()
-                .insert(key, empty_account);
+            self.account_storage.insert(key, empty_account);
             let seeds_vec: Vec<_> = seeds.iter().map(|&s| s.to_vec()).collect();
             Some(PdaStore {
                 pubkey: key,
@@ -270,9 +244,7 @@ impl FuzzClient for LighClient {
         spl_token::state::Account::pack(token_account, &mut data[..]).unwrap();
         account.set_data_from_slice(&data);
 
-        self.account_storage2
-            // .borrow_mut()
-            .insert(token_account_key, account);
+        self.account_storage.insert(token_account_key, account);
 
         token_account_key
     }
@@ -306,10 +278,7 @@ impl FuzzClient for LighClient {
         let mut data = vec![0u8; Mint::LEN];
         Mint::pack(mint, &mut data[..]).unwrap();
         account.set_data_from_slice(&data);
-        // self.ctx.set_account(&mint_account.pubkey(), &account);
-        self.account_storage2
-            // .borrow_mut()
-            .insert(mint_account_key, account);
+        self.account_storage.insert(mint_account_key, account);
 
         mint_account_key
     }
@@ -322,7 +291,7 @@ impl FuzzClient for LighClient {
         &mut self,
         key: &anchor_client::anchor_lang::prelude::Pubkey,
     ) -> Result<Option<solana_sdk::account::Account>, FuzzClientError> {
-        let storage = &self.account_storage2; //.borrow();
+        let storage = &self.account_storage; //.borrow();
         match storage.get(key) {
             Some(account) => Ok(Some(Account {
                 lamports: account.lamports,
@@ -353,71 +322,6 @@ impl FuzzClient for LighClient {
         todo!()
     }
 
-    // fn process_instruction(&mut self, instruction: Instruction) -> Result<(), FuzzClientError> {
-    //     let mut accounts_ser = vec![];
-
-    //     let mut temporary_account_storage = self.get_temporary_accounts(&instruction.accounts);
-
-    //     let mut dedup_ixs: HashMap<Pubkey, u16> = HashMap::new();
-    //     for (i, (account_meta, account_data)) in temporary_account_storage.iter_mut().enumerate() {
-    //         let duplicate_ix = dedup_ixs.insert(account_meta.pubkey, i as u16);
-    //         match duplicate_ix {
-    //             Some(i_orig_ix) => accounts_ser.push(SerializeAccountCustom::Duplicate(i_orig_ix)),
-    //             None => {
-    //                 let account_info = AccountInfo::new(
-    //                     &account_meta.pubkey,
-    //                     account_meta.is_signer,
-    //                     account_meta.is_writable,
-    //                     &mut account_data.lamports,
-    //                     &mut account_data.data,
-    //                     &account_data.owner,
-    //                     account_data.executable,
-    //                     account_data.rent_epoch,
-    //                 );
-
-    //                 accounts_ser.push(SerializeAccountCustom::Account(i as u16, account_info));
-    //             }
-    //         }
-    //     }
-
-    //     let mut parameter_bytes = serialize_parameters_aligned_custom2(
-    //         accounts_ser,
-    //         &instruction.data,
-    //         &instruction.program_id,
-    //         true,
-    //     )
-    //     .unwrap();
-
-    //     let (_program_id, account_infos, _input) =
-    //         unsafe { deserialize(&mut parameter_bytes.as_slice_mut()[0] as *mut u8) };
-
-    //     let result = (self.entry)(&instruction.program_id, &account_infos, &instruction.data);
-    //     match result {
-    //         Ok(_) => {
-    //             for account in account_infos.iter() {
-    //                 if account.is_writable {
-    //                     let mut storage = self.account_storage.borrow_mut();
-    //                     let account_data = storage.get_mut(account.key).unwrap();
-    //                     // if is_closed(account) {
-    //                     //     // FIXME closed account must have no balance (0 lamports) - why not to remove the account from storage?
-    //                     //     account_data.lamports = account.lamports.borrow_mut().to_owned();
-    //                     //     println!("### ACCOUNT CLOSED...");
-    //                     // } else {
-    //                     account_data.data = account.data.borrow().to_vec();
-    //                     account_data.lamports = account.lamports.borrow().to_owned();
-    //                     account_data.owner = account.owner.to_owned();
-    //                     // TODO check data can be resized
-    //                     // TODO check data can be changed
-    //                     // TODO check lamports sum is constant
-    //                     // }
-    //                 }
-    //             }
-    //             Ok(())
-    //         }
-    //         Err(_e) => Err(FuzzClientError::Custom(10)), // FIXME The ProgramError has to be propagated here
-    //     }
-    // }
-
     fn process_instruction(&mut self, instruction: Instruction) -> Result<(), FuzzClientError> {
         let mut dedup_ixs: HashMap<Pubkey, usize> =
             HashMap::with_capacity(instruction.accounts.len());
@@ -432,7 +336,7 @@ impl FuzzClient for LighClient {
         let account_refs = &instruction
             .accounts
             .iter()
-            .map(|m| self.account_storage2.get(&m.pubkey))
+            .map(|m| self.account_storage.get(&m.pubkey))
             .collect::<Vec<_>>();
         let duplicate_accounts = instruction.accounts.len() - dedup_ixs.len();
         let mut size = size_of::<u64>(); // number of accounts
@@ -457,7 +361,7 @@ impl FuzzClient for LighClient {
             size += data_len + (data_len as *const u8).align_offset(BPF_ALIGN_OF_U128);
         }
 
-        let mut s = SerializerCustomLight::new(size, true, true);
+        let mut s = SerializerCustomLight::new(size);
 
         // Serialize into the buffer
         s.write::<u64>((instruction.accounts.len() as u64).to_le());
@@ -515,18 +419,12 @@ impl FuzzClient for LighClient {
             Ok(_) => {
                 for account in account_infos.iter() {
                     if account.is_writable {
-                        // let mut storage = &self.account_storage2;//.borrow_mut();
-
                         if is_closed(account) {
                             // TODO if we remove the account, what about AccountStorage?
-                            self.account_storage2.remove(account.key);
-                            // account_data.lamports = account.lamports.borrow_mut().to_owned();
-                            println!("### ACCOUNT CLOSED...");
+                            self.account_storage.remove(account.key);
                         } else {
-                            println!("### UPDATING ACCOUNT...");
-                            // let account_data = self.account_storage2.get_mut(account.key).unwrap();
                             let account_data =
-                                self.account_storage2.entry(*account.key).or_default();
+                                self.account_storage.entry(*account.key).or_default();
                             account_data.data = account.data.borrow().to_vec();
                             account_data.lamports = account.lamports.borrow().to_owned();
                             account_data.owner = account.owner.to_owned();
@@ -549,7 +447,7 @@ impl FuzzClient for LighClient {
 /// done at one's own risk.
 ///
 /// # Safety
-pub unsafe fn deserialize_custom<'a>(input: *mut u8) -> Vec<AccountInfo<'a>> {
+pub(crate) unsafe fn deserialize_custom<'a>(input: *mut u8) -> Vec<AccountInfo<'a>> {
     let mut offset: usize = 0;
 
     // Number of accounts present
@@ -636,91 +534,14 @@ pub fn is_closed(info: &AccountInfo) -> bool {
     info.owner == &solana_system_program::id() && info.data_is_empty() && info.lamports() == 0
 }
 
-enum SerializeAccountCustom<'info> {
-    Account(IndexOfAccount, AccountInfo<'info>),
-    Duplicate(IndexOfAccount),
-}
-
-fn serialize_parameters_aligned_custom2(
-    accounts: Vec<SerializeAccountCustom>,
-    instruction_data: &[u8],
-    program_id: &Pubkey,
-    copy_account_data: bool,
-) -> Result<AlignedMemory<HOST_ALIGN>, InstructionError> {
-    // Calculate size in order to alloc once
-    let mut size = size_of::<u64>();
-    for account in &accounts {
-        size += 1; // dup
-        match account {
-            SerializeAccountCustom::Duplicate(_) => size += 7, // padding to 64-bit aligned
-            SerializeAccountCustom::Account(_, account) => {
-                let data_len = account.data_len();
-                size += size_of::<u8>() // is_signer
-                + size_of::<u8>() // is_writable
-                + size_of::<u8>() // executable
-                + size_of::<u32>() // original_data_len
-                + size_of::<Pubkey>()  // key
-                + size_of::<Pubkey>() // owner
-                + size_of::<u64>()  // lamports
-                + size_of::<u64>()  // data len
-                + MAX_PERMITTED_DATA_INCREASE
-                + size_of::<u64>(); // rent epoch
-                if copy_account_data {
-                    size += data_len + (data_len as *const u8).align_offset(BPF_ALIGN_OF_U128);
-                } else {
-                    size += BPF_ALIGN_OF_U128;
-                }
-            }
-        }
-    }
-    size += size_of::<u64>() // data len
-    + instruction_data.len()
-    + size_of::<Pubkey>(); // program id;
-
-    let mut s = SerializerCustomLight::new(size, true, copy_account_data);
-
-    // Serialize into the buffer
-    s.write::<u64>((accounts.len() as u64).to_le());
-    for account in accounts {
-        match account {
-            SerializeAccountCustom::Account(_, mut borrowed_account) => {
-                s.write::<u8>(NON_DUP_MARKER);
-                s.write::<u8>(borrowed_account.is_signer as u8);
-                s.write::<u8>(borrowed_account.is_writable as u8);
-                s.write::<u8>(borrowed_account.executable as u8);
-                s.write_all(&[0u8, 0, 0, 0]);
-                s.write_all(borrowed_account.key.as_ref());
-                s.write_all(borrowed_account.owner.as_ref());
-                s.write::<u64>(borrowed_account.lamports().to_le());
-                s.write::<u64>((borrowed_account.data_len() as u64).to_le());
-                s.write_account(&mut borrowed_account)?;
-                s.write::<u64>((borrowed_account.rent_epoch).to_le());
-            }
-            SerializeAccountCustom::Duplicate(position) => {
-                s.write::<u8>(position as u8);
-                s.write_all(&[0u8, 0, 0, 0, 0, 0, 0]);
-            }
-        };
-    }
-    s.write::<u64>((instruction_data.len() as u64).to_le());
-    s.write_all(instruction_data);
-    s.write_all(program_id.as_ref());
-
-    let mem = s.finish();
-    Ok(mem)
-}
-
 struct SerializerCustomLight {
-    pub buffer: AlignedMemory<HOST_ALIGN>,
-    aligned: bool,
-    copy_account_data: bool,
+    buffer: AlignedMemory<HOST_ALIGN>,
 }
+
 impl SerializerCustomLight {
-    fn new(size: usize, aligned: bool, copy_account_data: bool) -> SerializerCustomLight {
+    fn new(size: usize) -> SerializerCustomLight {
         SerializerCustomLight {
             buffer: AlignedMemory::with_capacity(size),
-            aligned,
-            copy_account_data,
         }
     }
 
@@ -748,30 +569,6 @@ impl SerializerCustomLight {
         unsafe {
             self.buffer.write_all_unchecked(value);
         }
-    }
-
-    fn write_account(&mut self, account: &mut AccountInfo<'_>) -> Result<(), InstructionError> {
-        if self.copy_account_data {
-            self.write_all(*account.data.borrow());
-        };
-
-        if self.aligned {
-            let align_offset = (account.data_len() as *const u8).align_offset(BPF_ALIGN_OF_U128);
-            if self.copy_account_data {
-                self.fill_write(MAX_PERMITTED_DATA_INCREASE + align_offset, 0)
-                    .map_err(|_| InstructionError::InvalidArgument)?;
-            } else {
-                // The deserialization code is going to align the vm_addr to
-                // BPF_ALIGN_OF_U128. Always add one BPF_ALIGN_OF_U128 worth of
-                // padding and shift the start of the next region, so that once
-                // vm_addr is aligned, the corresponding host_addr is aligned
-                // too.
-                self.fill_write(MAX_PERMITTED_DATA_INCREASE + BPF_ALIGN_OF_U128, 0)
-                    .map_err(|_| InstructionError::InvalidArgument)?;
-            }
-        }
-
-        Ok(())
     }
 
     fn write_account_custom(&mut self, account: &TridentAccount) -> Result<(), InstructionError> {
