@@ -8,6 +8,7 @@ use solana_program::entrypoint::{
     ProcessInstruction, BPF_ALIGN_OF_U128, MAX_PERMITTED_DATA_INCREASE, NON_DUP_MARKER,
 };
 use solana_program::instruction::InstructionError;
+use solana_program::sysvar::rent;
 use solana_program::{program_pack::Pack, rent::Rent};
 use solana_program_runtime::solana_rbpf::aligned_memory::{AlignedMemory, Pod};
 use solana_program_runtime::solana_rbpf::ebpf::HOST_ALIGN;
@@ -117,6 +118,9 @@ impl LightClient {
             spl_associated_token_account::processor::process_instruction,
         );
 
+        // TODO support also other sysvars
+        new_client.add_rent()?;
+
         test_syscall_stubs(program_id);
 
         Ok(new_client)
@@ -125,6 +129,22 @@ impl LightClient {
     /// Initializes the LightClient before usage.
     pub fn init(&self) {
         set_light_client(self);
+    }
+
+    fn add_rent(&mut self) -> Result<(), FuzzClientError> {
+        let rent = Rent::default();
+        let size = size_of::<Rent>();
+        let mut data = vec![0; size];
+        bincode::serialize_into(&mut data[..], &rent)
+            .map_err(|e| FuzzClientError::ClientInitError(e))?;
+
+        let lamports = rent.minimum_balance(data.len());
+
+        let mut account = TridentAccount::new(lamports, size, &solana_program::sysvar::id());
+
+        account.set_data_from_slice(&data[..]);
+        self.account_storage.insert(rent::id(), account);
+        Ok(())
     }
 
     fn add_system_program(&mut self) {

@@ -9,8 +9,7 @@ pub enum FuzzClientError {
     #[error("Custom fuzzing error: {0}")]
     Custom(u32),
     #[error("Not able to initialize client: {0}")]
-    ClientInitError(#[from] std::io::Error),
-    // Box for Error variant too Long warnings
+    ClientInitError(Box<dyn std::error::Error>),
     #[error("Banks Client Error: {0}")]
     BanksError(Box<BanksClientError>),
     #[error("Cannot Get Account")]

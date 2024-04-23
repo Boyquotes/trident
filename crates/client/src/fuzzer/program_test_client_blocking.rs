@@ -26,7 +26,10 @@ impl ProgramTestClientBlocking {
         entry: Option<BuiltinFunctionWithContext>,
     ) -> Result<Self, FuzzClientError> {
         let program_test = ProgramTest::new(program_name, program_id, entry);
-        let rt: tokio::runtime::Runtime = Builder::new_current_thread().enable_all().build()?;
+        let rt: tokio::runtime::Runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| FuzzClientError::ClientInitError(Box::new(e)))?;
 
         let ctx = rt.block_on(program_test.start_with_context());
         Ok(Self { ctx, rt })
