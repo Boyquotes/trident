@@ -18,6 +18,8 @@ pub enum FuzzClientError {
     NotImplemnted,
     #[error("Program error: {0}")]
     ProgramError(ProgramError),
+    #[error("Client error: Program with address {0} was not found")]
+    ProgramNotFound(Pubkey),
 }
 
 #[derive(Debug, Error)]

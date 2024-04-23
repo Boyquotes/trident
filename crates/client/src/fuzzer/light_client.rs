@@ -5,14 +5,14 @@ use std::rc::Rc;
 use std::slice::from_raw_parts_mut;
 
 use solana_program::entrypoint::{
-    ProcessInstruction, BPF_ALIGN_OF_U128, MAX_PERMITTED_DATA_INCREASE, NON_DUP_MARKER,
+    ProcessInstruction, ProgramResult, BPF_ALIGN_OF_U128, MAX_PERMITTED_DATA_INCREASE,
+    NON_DUP_MARKER,
 };
 use solana_program::instruction::InstructionError;
 use solana_program::sysvar::rent;
 use solana_program::{program_pack::Pack, rent::Rent};
 use solana_program_runtime::solana_rbpf::aligned_memory::{AlignedMemory, Pod};
 use solana_program_runtime::solana_rbpf::ebpf::HOST_ALIGN;
-use solana_program_test_anchor_fix::IndexOfAccount;
 use solana_sdk::account::AccountSharedData;
 use solana_sdk::clock::Epoch;
 use solana_sdk::{
@@ -26,11 +26,11 @@ use crate::data_builder::FuzzClient;
 use crate::error::*;
 use crate::program_stubs::test_syscall_stubs;
 
-pub type ProgramEntry = for<'info> fn(
+pub type ProgramEntry = for<'info, 'b> fn(
     program_id: &Pubkey,
-    accounts: &'info [AccountInfo<'info>],
+    accounts: &'info [AccountInfo<'b>],
     instruction_data: &[u8],
-) -> anchor_lang::solana_program::entrypoint::ProgramResult;
+) -> ProgramResult;
 
 #[repr(C)]
 #[derive(Clone, Debug, Default)]
@@ -95,20 +95,20 @@ pub(crate) fn get_light_client<'a>() -> &'a LightClient {
 }
 
 pub struct LightClient {
-    pub entry: ProgramEntry,
     pub account_storage: HashMap<Pubkey, TridentAccount>,
     pub programs: HashMap<Pubkey, ProcessInstruction>,
 }
 
 impl LightClient {
     /// Create new LightClient instance with a program entrypoint. Call the `init()` method before using the client.
+    // TODO make the same order of parameters as in add_program
     pub fn new(entry: ProgramEntry, program_id: Pubkey) -> Result<Self, FuzzClientError> {
         let mut new_client = Self {
-            entry,
             account_storage: HashMap::new(),
             programs: HashMap::new(),
         };
         new_client.add_system_program();
+        new_client.add_program(program_id, entry);
         new_client.add_program(
             anchor_spl::token::ID,
             spl_token::processor::Processor::process,
@@ -452,29 +452,35 @@ impl FuzzClient for LightClient {
         let account_infos =
             unsafe { deserialize_custom(&mut parameter_bytes.as_slice_mut()[0] as *mut u8) };
 
-        let result = (self.entry)(&instruction.program_id, &account_infos, &instruction.data);
-        match result {
-            Ok(_) => {
-                for account in account_infos.iter() {
-                    if account.is_writable {
-                        if is_closed(account) {
-                            // TODO if we remove the account, what about AccountStorage?
-                            self.account_storage.remove(account.key);
-                        } else {
-                            let account_data =
-                                self.account_storage.entry(*account.key).or_default();
-                            account_data.data = account.data.borrow().to_vec();
-                            account_data.lamports = account.lamports.borrow().to_owned();
-                            account_data.owner = account.owner.to_owned();
-                            // TODO check data can be resized
-                            // TODO check lamports sum is constant
-                        }
-                    }
-                }
-                Ok(())
+        match self.programs.get(&instruction.program_id) {
+            Some(entrypoint) => {
+                (entrypoint)(&instruction.program_id, &account_infos, &instruction.data)
+                    .map_err(FuzzClientError::ProgramError)?
             }
-            Err(e) => Err(FuzzClientError::ProgramError(e)),
+            None if instruction.program_id == solana_system_program::id() => {
+                solana_program::program::invoke(&instruction, &account_infos)
+                    .map_err(FuzzClientError::ProgramError)?
+            }
+            None => Err(FuzzClientError::ProgramNotFound(instruction.program_id))?,
+        };
+
+        // let result = (self.entry)(&instruction.program_id, &account_infos, &instruction.data);
+        for account in account_infos.iter() {
+            if account.is_writable {
+                if is_closed(account) {
+                    // TODO if we remove the account, what about AccountStorage?
+                    self.account_storage.remove(account.key);
+                } else {
+                    let account_data = self.account_storage.entry(*account.key).or_default();
+                    account_data.data = account.data.borrow().to_vec();
+                    account_data.lamports = account.lamports.borrow().to_owned();
+                    account_data.owner = account.owner.to_owned();
+                    // TODO check data can be resized
+                    // TODO check lamports sum is constant
+                }
+            }
         }
+        Ok(())
     }
 }
 

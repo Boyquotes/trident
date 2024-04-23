@@ -1,7 +1,4 @@
-use std::{
-    mem::transmute,
-    sync::{Arc, RwLock},
-};
+use std::sync::{Arc, RwLock};
 
 use serde::{Deserialize, Serialize};
 use solana_program::{
@@ -149,7 +146,7 @@ impl program_stubs::SyscallStubs for TestSyscallStubs {
 
                         signers = signers_seeds
                             .iter()
-                            .map(|seeds| Pubkey::create_program_address(seeds, &caller).unwrap()) // FIX check who should be the program_id
+                            .map(|seeds| Pubkey::create_program_address(seeds, &caller).unwrap())
                             .collect::<Vec<_>>();
                     }
 
@@ -260,7 +257,7 @@ pub fn test_syscall_stubs(program_id: Pubkey) {
 
     ONCE.call_once(|| {
         program_stubs::set_syscall_stubs(Box::new(TestSyscallStubs {
-            callers: Arc::new(RwLock::new(vec![program_id])),
+            callers: Arc::new(RwLock::new(vec![program_id])), // FIX the first caller does not have to be the user program
             data: Arc::new(RwLock::new(TransactionReturnData::default())),
         }));
     });
