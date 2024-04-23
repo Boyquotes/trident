@@ -323,13 +323,27 @@ impl FuzzClient for LightClient {
     }
 
     fn process_instruction(&mut self, instruction: Instruction) -> Result<(), FuzzClientError> {
+        let mut instruction = instruction;
         let mut dedup_ixs: HashMap<Pubkey, usize> =
             HashMap::with_capacity(instruction.accounts.len());
 
-        for (i, account_meta) in instruction.accounts.iter().enumerate() {
-            if dedup_ixs.get(&account_meta.pubkey).is_none() {
-                dedup_ixs.insert(account_meta.pubkey, i);
-            }
+        for i in 0..instruction.accounts.len() {
+            match dedup_ixs.get(&instruction.accounts[i].pubkey) {
+                // the account is already in the HashMap, so it is a duplicate
+                Some(&reference_index) => {
+                    //  if the duplicate account is signer or writable, make sure also the referrence account is set accordingly
+                    if instruction.accounts[i].is_signer {
+                        instruction.accounts[reference_index].is_signer = true;
+                    }
+                    if instruction.accounts[i].is_writable {
+                        instruction.accounts[reference_index].is_writable = true;
+                    }
+                }
+                // the account is not yet in the HashMap, so it is not a duplicate
+                None => {
+                    dedup_ixs.insert(instruction.accounts[i].pubkey, i);
+                }
+            };
         }
 
         // We expect duplicate accounts will be only minority so we return references to all accounts
