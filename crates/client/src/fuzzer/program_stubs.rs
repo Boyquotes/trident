@@ -214,9 +214,10 @@ impl program_stubs::SyscallStubs for TestSyscallStubs {
         Some((program_id, data))
     }
 
-    // fn sol_get_stack_height(&self) -> u64 {
-    //     1
-    // }
+    fn sol_get_stack_height(&self) -> u64 {
+        let callers = self.callers.read().unwrap();
+        callers.len() as u64
+    }
 }
 
 pub fn subtract_lamports(from: &AccountInfo, lamports: u64) {
