@@ -1,4 +1,5 @@
 use solana_banks_client::BanksClientError;
+use solana_program::program_error::ProgramError;
 use solana_sdk::pubkey::Pubkey;
 use std::fmt::{Debug, Display};
 use thiserror::Error;
@@ -16,6 +17,8 @@ pub enum FuzzClientError {
     CannotGetAccounts,
     #[error("This method is not implemented for this type of the Client")]
     NotImplemnted,
+    #[error("Program error: {0}")]
+    ProgramError(ProgramError),
 }
 
 #[derive(Debug, Error)]

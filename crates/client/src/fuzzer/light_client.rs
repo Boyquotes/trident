@@ -435,7 +435,7 @@ impl FuzzClient for LightClient {
                 }
                 Ok(())
             }
-            Err(_e) => Err(FuzzClientError::Custom(10)), // FIXME The ProgramError has to be propagated here
+            Err(e) => Err(FuzzClientError::ProgramError(e)),
         }
     }
 }
