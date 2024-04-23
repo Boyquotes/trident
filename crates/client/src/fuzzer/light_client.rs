@@ -114,6 +114,10 @@ impl LightClient {
             spl_token::processor::Processor::process,
         );
         new_client.add_program(
+            anchor_spl::token_2022::ID,
+            spl_token_2022::processor::Processor::process,
+        );
+        new_client.add_program(
             anchor_spl::associated_token::ID,
             spl_associated_token_account::processor::process_instruction,
         );
