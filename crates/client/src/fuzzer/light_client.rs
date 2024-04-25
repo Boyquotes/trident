@@ -26,9 +26,9 @@ use crate::data_builder::FuzzClient;
 use crate::error::*;
 use crate::program_stubs::test_syscall_stubs;
 
-pub type ProgramEntry = for<'info, 'b> fn(
+pub type ProgramEntry = for<'info> fn(
     program_id: &Pubkey,
-    accounts: &'info [AccountInfo<'b>],
+    accounts: &'info [AccountInfo<'info>],
     instruction_data: &[u8],
 ) -> ProgramResult;
 
@@ -108,7 +108,7 @@ impl LightClient {
             programs: HashMap::new(),
         };
         new_client.add_system_program();
-        new_client.add_program(program_id, entry);
+        new_client.add_program2(program_id, entry);
         new_client.add_program(
             anchor_spl::token::ID,
             spl_token::processor::Processor::process,
@@ -162,7 +162,29 @@ impl LightClient {
             .insert(solana_sdk::system_program::ID, program);
     }
 
+    /// Add new arbitrary program to the client. Starting from Anchor 0.29.0, the entry point signature
+    /// has more restrictive lifetime requirements. Use this method to add programs written in Anchor 0.29.0 and above.
+    ///
+    /// - `program_id` is the address of your program
+    /// - `process_function` is the closure that will be called to enter the program and process instructions
+    pub fn add_program2(&mut self, program_id: Pubkey, process_function: ProgramEntry) {
+        let x = unsafe {
+            transmute::<ProgramEntry, solana_sdk::entrypoint::ProcessInstruction>(process_function)
+        };
+        self.programs.insert(program_id, x);
+
+        let rent = Rent::default().minimum_balance(0).max(1);
+        let program = TridentAccount {
+            executable: true,
+            lamports: rent,
+            ..Default::default()
+        };
+        self.account_storage.insert(program_id, program);
+    }
+
     /// Add new arbitrary program to the client.
+    ///
+    /// HINT: Use the [`add_program2`] method for programs written in Anchor 0.29.0 and above.
     ///
     /// - `program_id` is the address of your program
     /// - `process_function` is the closure that will be called to enter the program and process instructions
