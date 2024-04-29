@@ -170,7 +170,8 @@ pub fn fuzz_test_executor_light(input: TokenStream) -> TokenStream {
                        program_id: Pubkey,
                        accounts: &RefCell<FuzzAccounts>,
                        client: &mut impl FuzzClient,
-                   ) -> core::result::Result<(), Box<dyn std::error::Error + 'static>> {
+                       sent_txs: &mut HashMap<Hash, ()>,
+                   ) -> core::result::Result<(), FuzzClientErrorWithOrigin> {
                            match self {
                                #(#display_match_arms)*
                            }
