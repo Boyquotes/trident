@@ -4,12 +4,13 @@ use std::mem::{size_of, transmute};
 use std::rc::Rc;
 use std::slice::from_raw_parts_mut;
 
+use solana_program::clock::Clock;
 use solana_program::entrypoint::{
     ProcessInstruction, ProgramResult, BPF_ALIGN_OF_U128, MAX_PERMITTED_DATA_INCREASE,
     NON_DUP_MARKER,
 };
 use solana_program::instruction::InstructionError;
-use solana_program::sysvar::rent;
+use solana_program::sysvar::{clock, rent};
 use solana_program::{program_pack::Pack, rent::Rent};
 use solana_program_runtime::solana_rbpf::aligned_memory::{AlignedMemory, Pod};
 use solana_program_runtime::solana_rbpf::ebpf::HOST_ALIGN;
@@ -124,6 +125,7 @@ impl LightClient {
 
         // TODO support also other sysvars
         new_client.add_rent()?;
+        new_client.add_clock()?;
 
         test_syscall_stubs(program_id);
 
@@ -148,6 +150,23 @@ impl LightClient {
 
         account.set_data_from_slice(&data[..]);
         self.account_storage.insert(rent::id(), account);
+        Ok(())
+    }
+
+    fn add_clock(&mut self) -> Result<(), FuzzClientError> {
+        let clock = Clock::default();
+        let rent = Rent::default();
+        let size = size_of::<Clock>();
+        let mut data = vec![0; size];
+        bincode::serialize_into(&mut data[..], &clock)
+            .map_err(|e| FuzzClientError::ClientInitError(e))?;
+
+        let lamports = rent.minimum_balance(data.len());
+
+        let mut account = TridentAccount::new(lamports, size, &solana_program::sysvar::id());
+
+        account.set_data_from_slice(&data[..]);
+        self.account_storage.insert(clock::id(), account);
         Ok(())
     }
 
