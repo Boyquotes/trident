@@ -1,0 +1,83 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+    
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in library 'fuzz_example3'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib",
+                    "--package=fuzz_example3"
+                ],
+                "filter": {
+                    "name": "fuzz_example3",
+                    "kind": "lib"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'fuzz_0'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=fuzz_0",
+                    "--package=fuzz_tests"
+                ],
+                "filter": {
+                    "name": "fuzz_0",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug fuzz test 'fuzz_0'",
+            "cargo": {
+                "args": [
+                    "hfuzz",
+                    "run-debug",
+                    "fuzz_0"
+                ],
+                "filter": {
+                    "name": "fuzz_0",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'fuzz_0'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=fuzz_0",
+                    "--package=fuzz_tests"
+                ],
+                "filter": {
+                    "name": "fuzz_0",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}
